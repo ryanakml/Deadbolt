@@ -6,7 +6,7 @@ This workspace implements contract validation and conformance tests, plus a disp
 
 | Tool       | Pin     | Why                                                                                  |
 | ---------- | ------- | ------------------------------------------------------------------------------------ |
-| Go         | 1.27.1  | Current stable release selected from go.dev on 2026-09-11; same exact compiler in CI |
+| Go         | 1.27.4  | Current stable release selected from go.dev on 2026-11-02; same exact compiler in CI |
 | Node.js    | 24.21.0 | Supported Node 24 LTS; replaces the contributor's EOL Node 20 baseline               |
 | pnpm       | 10.24.0 | Retained exact package-manager pin; frozen dependency lock                           |
 | TypeScript | 5.9.3   | Strict NodeNext compilation, package lock records all transitive versions            |

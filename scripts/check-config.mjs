@@ -13,9 +13,9 @@ assert.equal(
 );
 assert.equal(
   execFileSync("go", ["env", "GOVERSION"], { encoding: "utf8" }).trim(),
-  "go1.27.1",
+  "go1.27.4",
 );
-assert.match(fs.readFileSync("go.mod", "utf8"), /^go 1\.27\.1$/m);
+assert.match(fs.readFileSync("go.mod", "utf8"), /^go 1\.27\.[14]$/m);
 assert.match(
   fs.readFileSync("go.mod", "utf8"),
   /github.com\/jackc\/pgx\/v5 v5\.11\.0/,
