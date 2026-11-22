@@ -234,12 +234,12 @@ func (s *Service) UpdateEndpoint(ctx context.Context, orgID, endpointID string, 
 		}
 
 		return s.recordAudit(ctx, tx, orgID, "webhook_endpoint.updated", endpoint.ID, "WEBHOOK_ENDPOINT", map[string]any{
-			"url":          targetURL,
-			"urlChanged":   urlChanged,
-			"enabled":      targetActive,
-			"eventTypes":   targetEvents,
+			"url":           targetURL,
+			"urlChanged":    urlChanged,
+			"enabled":       targetActive,
+			"eventTypes":    targetEvents,
 			"secretRotated": rotateSecret,
-			"revision":     nextRevision,
+			"revision":      nextRevision,
 		}, audit)
 	})
 
