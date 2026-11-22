@@ -3682,5 +3682,101 @@ func appendRunEvent(ctx context.Context, tx storage.Tx, organizationID, runID, e
 	_, err = tx.Exec(ctx, `INSERT INTO outbox_events (organization_id,event_id,subject,payload)
 		VALUES ($1::uuid,$2::uuid,'execution.state_changed',jsonb_build_object(
 			'runId',$3::text,'sequence',$4::bigint,'eventType',$5::text))`, organizationID, eventID, runID, sequence, eventType)
-	return err
+	if err != nil {
+		return err
+	}
+
+	// Enqueue Webhook Delivery Intents (Blueprint §21, Issue #39)
+	_ = enqueueWebhooksForRunEventTx(ctx, tx, organizationID, runID, eventID, eventType, sequence, payload)
+
+	return nil
+}
+
+func enqueueWebhooksForRunEventTx(ctx context.Context, tx storage.Tx, organizationID, runID, eventID, eventType string, sequence int64, payload any) error {
+	var webhookEventType string
+	switch eventType {
+	case "RUN_COMPLETED":
+		webhookEventType = "run.succeeded"
+	case "RUN_FAILED":
+		webhookEventType = "run.failed"
+	case "RUN_CANCELLED":
+		webhookEventType = "run.cancelled"
+	case "APPROVAL_REQUESTED":
+		webhookEventType = "approval.requested"
+	default:
+		return nil
+	}
+
+	var envID string
+	if err := tx.QueryRow(ctx, `SELECT environment_id::text FROM runs WHERE id=$1::uuid AND organization_id=$2::uuid`, runID, organizationID).Scan(&envID); err != nil {
+		return nil
+	}
+
+	rows, err := tx.Query(ctx, `
+		SELECT id::text, revision
+		FROM webhook_endpoints
+		WHERE organization_id = $1::uuid AND environment_id = $2::uuid
+		  AND active = true AND $3 = ANY(subscribed_events)
+	`, organizationID, envID, webhookEventType)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	type target struct {
+		id       string
+		revision int64
+	}
+	var targets []target
+	for rows.Next() {
+		var t target
+		if err := rows.Scan(&t.id, &t.revision); err != nil {
+			return nil
+		}
+		targets = append(targets, t)
+	}
+
+	if len(targets) == 0 {
+		return nil
+	}
+
+	summary := make(map[string]any)
+	if m, ok := payload.(map[string]any); ok {
+		for k, v := range m {
+			summary[k] = v
+		}
+	}
+	summary["runId"] = runID
+	summary["sequence"] = sequence
+
+	eventPayload := map[string]any{
+		"id":             eventID,
+		"eventType":      webhookEventType,
+		"environmentId":  envID,
+		"runId":          runID,
+		"payloadVersion": 1,
+		"committedAt":    time.Now().UTC().Format(time.RFC3339Nano),
+		"summary":        summary,
+	}
+	payloadBytes, err := json.Marshal(eventPayload)
+	if err != nil {
+		return err
+	}
+
+	for _, tgt := range targets {
+		deliveryID, _ := tenant.NewUUID()
+		if _, err := tx.Exec(ctx, `
+			INSERT INTO webhook_deliveries (
+				id, organization_id, endpoint_id, endpoint_revision, event_id, event_type,
+				run_id, payload, attempts, status, next_at, created_at
+			) VALUES (
+				$1::uuid, $2::uuid, $3::uuid, $4, $5::uuid, $6,
+				$7::uuid, $8, 0, 'PENDING', clock_timestamp(), clock_timestamp()
+			)
+		`, deliveryID, organizationID, tgt.id, tgt.revision, eventID, webhookEventType, runID, payloadBytes); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }

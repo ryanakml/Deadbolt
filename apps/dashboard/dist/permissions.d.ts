@@ -18,5 +18,8 @@ export declare function visibleRunControls(status: RunStatus, canControl: boolea
 export declare const WORKERS_DRAIN_CAPABILITY = "workers:drain";
 export declare function roleCanDrainWorkers(role: string | null | undefined): boolean;
 export declare function sessionCanDrainWorkers(session: AuthSession | null | undefined, orgId: string | null | undefined): boolean;
+export declare const WEBHOOKS_WRITE_CAPABILITY = "webhooks:write";
+export declare function roleCanManageWebhooks(role: string | null | undefined): boolean;
+export declare function sessionCanManageWebhooks(session: AuthSession | null | undefined, orgId: string | null | undefined): boolean;
 export declare function visibleRerunControl(status: RunStatus, canControl: boolean): boolean;
 //# sourceMappingURL=permissions.d.ts.map

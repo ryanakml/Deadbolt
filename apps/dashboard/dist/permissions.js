@@ -133,6 +133,29 @@ export function sessionCanDrainWorkers(session, orgId) {
     }
     return false;
 }
+export const WEBHOOKS_WRITE_CAPABILITY = "webhooks:write";
+const WEBHOOKS_MANAGE_ROLES = new Set(["operator", "admin", "owner"]);
+// roleCanManageWebhooks reports whether a canonical role grants webhooks:write.
+export function roleCanManageWebhooks(role) {
+    if (!role)
+        return false;
+    return WEBHOOKS_MANAGE_ROLES.has(role.trim().toLowerCase());
+}
+// sessionCanManageWebhooks mirrors roleCanManageWebhooks against the BFF
+// session membership for the given organization.
+export function sessionCanManageWebhooks(session, orgId) {
+    if (!session || !orgId)
+        return false;
+    const memberships = session.memberships ?? [];
+    for (const m of memberships) {
+        if (!m || m.OrganizationID !== orgId)
+            continue;
+        if (String(m.Status ?? "").toUpperCase() !== "ACTIVE")
+            continue;
+        return roleCanManageWebhooks(m.Role);
+    }
+    return false;
+}
 // visibleRerunControl determines whether the Rerun CTA should render.
 // Blueprint §20.2 / INV-09: Rerun creates a new run from the beginning with
 // new operation IDs. It renders for terminal runs (SUCCEEDED, FAILED, CANCELLED)

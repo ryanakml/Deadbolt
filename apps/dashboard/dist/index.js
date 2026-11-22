@@ -6,7 +6,7 @@ export * from "./permissions.js";
 import { DashboardApiClient, isUnauthorized, isConflict, newIdempotencyKey, } from "./api.js";
 import { createEnvironmentSelection, formatEnvironmentLabel, getSelectedEnvironmentId, selectEnvironment, setSelectionCatalog, setSelectionOrganization, } from "./api.js";
 import { resolveOrgState } from "./auth.js";
-import { sessionCanControlRuns, sessionCanDecideApprovals, sessionCanDrainWorkers, sessionCanManageSchedules, visibleRunControls, visibleRerunControl, } from "./permissions.js";
+import { sessionCanControlRuns, sessionCanDecideApprovals, sessionCanDrainWorkers, sessionCanManageSchedules, sessionCanManageWebhooks, visibleRunControls, visibleRerunControl, } from "./permissions.js";
 import { RunInspector } from "./inspector.js";
 import { shouldShowWorkerWait, terminalStepEmptyText, openCaseForStep, reconciliationHoldText, terminationBannerText, RESOLVE_ACTIONS, getStatusPresentation, computeGraphLayout, computeMinimap, filterEventsForStep, virtualizeItems, getBoundedEvents, } from "./inspector.js";
 import { clearStreamErrorOnLive, createStreamErrorBanner, markGlobalError, markStreamError, } from "./stream.js";
@@ -36,6 +36,7 @@ function initDashboard() {
     // developer holds runs:control but never schedules:write.
     let canManageSchedules = false;
     let canDrainWorkers = false;
+    let canManageWebhooks = false;
     // Active view id so the environment selector can refresh the schedules
     // list only when the schedules view is showing. Unconditional refreshes
     // would issue protected requests the current view never asked for.
@@ -62,6 +63,7 @@ function initDashboard() {
     const workersNavBtn = document.getElementById("nav-workers");
     const schedulesNavBtn = document.getElementById("nav-schedules");
     const deploymentsNavBtn = document.getElementById("nav-deployments");
+    const webhooksNavBtn = document.getElementById("nav-webhooks");
     if (envSelect) {
         envSelect.addEventListener("change", () => {
             selectEnvironment(envSelection, envSelect.value || null);
@@ -74,6 +76,9 @@ function initDashboard() {
             }
             else if (activeViewId === "deployments-view") {
                 loadDeploymentsList(api, getSelectedEnvironmentId(envSelection));
+            }
+            else if (activeViewId === "webhooks-view") {
+                loadWebhooksList(api, getSelectedEnvironmentId(envSelection));
             }
         });
     }
@@ -115,6 +120,12 @@ function initDashboard() {
             loadDeploymentsList(api, getSelectedEnvironmentId(envSelection));
         });
     }
+    if (webhooksNavBtn) {
+        webhooksNavBtn.addEventListener("click", () => {
+            showView("webhooks-view");
+            loadWebhooksList(api, getSelectedEnvironmentId(envSelection));
+        });
+    }
     const schedulesNewBtn = document.getElementById("schedules-new-btn");
     if (schedulesNewBtn) {
         schedulesNewBtn.addEventListener("click", (e) => {
@@ -122,6 +133,21 @@ function initDashboard() {
             if (!envId)
                 return;
             openScheduleCreateDialog(api, envId, e.currentTarget);
+        });
+    }
+    const webhooksNewBtn = document.getElementById("webhooks-new-btn");
+    if (webhooksNewBtn) {
+        webhooksNewBtn.addEventListener("click", (e) => {
+            const envId = getSelectedEnvironmentId(envSelection);
+            if (!envId)
+                return;
+            openWebhookCreateDialog(api, envId, e.currentTarget);
+        });
+    }
+    const deliveriesCloseBtn = document.getElementById("deliveries-close-btn");
+    if (deliveriesCloseBtn) {
+        deliveriesCloseBtn.addEventListener("click", () => {
+            document.getElementById("deliveries-panel")?.classList.add("hidden");
         });
     }
     // Check URL params for deep linking to /runs/:id
@@ -195,6 +221,7 @@ function initDashboard() {
         // be inferred from runs:control either.
         canManageSchedules = sessionCanManageSchedules(session, orgId);
         canDrainWorkers = sessionCanDrainWorkers(session, orgId);
+        canManageWebhooks = sessionCanManageWebhooks(session, orgId);
         await loadEnvironmentCatalog(orgId);
         if (runIdParam) {
             inspectRun(runIdParam);
@@ -1242,6 +1269,307 @@ function initDashboard() {
             })
                 .catch((err) => {
                 confirmBtn.removeAttribute("disabled");
+                showError(err instanceof Error ? err.message : String(err));
+            });
+        });
+    }
+    async function loadWebhooksList(client, envId) {
+        const listContainer = document.getElementById("webhooks-table-body");
+        const newBtn = document.getElementById("webhooks-new-btn");
+        if (newBtn) {
+            if (canManageWebhooks) {
+                newBtn.classList.remove("hidden");
+            }
+            else {
+                newBtn.classList.add("hidden");
+            }
+        }
+        if (!listContainer)
+            return;
+        if (!envId) {
+            renderEnvironmentEmptyState();
+            return;
+        }
+        listContainer.innerHTML =
+            '<tr><td colspan="6" class="loading">Loading webhooks...</td></tr>';
+        try {
+            const resp = await client.listWebhookEndpoints(envId);
+            if (resp.items.length === 0) {
+                listContainer.innerHTML =
+                    '<tr><td colspan="6" class="empty-state">No webhooks found in this environment.</td></tr>';
+                return;
+            }
+            listContainer.innerHTML = "";
+            for (const ep of resp.items) {
+                const row = document.createElement("tr");
+                row.setAttribute("data-webhook-item", ep.id);
+                const statusBadge = ep.enabled
+                    ? '<span class="badge status-active">ACTIVE</span>'
+                    : '<span class="badge status-paused">DISABLED</span>';
+                const actions = `
+          <button class="link-btn webhook-deliveries-btn" data-webhook-id="${escapeHtml(ep.id)}">Deliveries</button>
+          ${canManageWebhooks
+                    ? `
+              <button class="secondary-btn webhook-toggle-btn" data-webhook-id="${escapeHtml(ep.id)}" data-webhook-revision="${ep.revision}" data-webhook-enabled="${ep.enabled}">
+                ${ep.enabled ? "Disable" : "Enable"}
+              </button>
+              <button class="secondary-btn webhook-rotate-btn" data-webhook-id="${escapeHtml(ep.id)}" data-webhook-revision="${ep.revision}">
+                Rotate Secret
+              </button>
+              <button class="danger-btn webhook-delete-btn" data-webhook-id="${escapeHtml(ep.id)}" data-webhook-revision="${ep.revision}">
+                Delete
+              </button>
+            `
+                    : ""}
+        `;
+                row.innerHTML = `
+          <td><code>${escapeHtml(ep.url)}</code></td>
+          <td>${escapeHtml((ep.eventTypes || []).join(", "))}</td>
+          <td>${statusBadge}</td>
+          <td>${ep.revision}</td>
+          <td><code>${escapeHtml(ep.signingKeyId || "-")}</code></td>
+          <td><div class="table-actions">${actions}</div></td>
+        `;
+                listContainer.appendChild(row);
+            }
+            wireWebhookItemButtons(client, envId, listContainer, resp.items);
+        }
+        catch (err) {
+            if (isUnauthorized(err)) {
+                handleUnauthorized();
+                return;
+            }
+            const msg = err instanceof Error ? err.message : String(err);
+            if (msg.includes("HTTP 403")) {
+                listContainer.innerHTML =
+                    '<tr><td colspan="6" class="empty-state">Webhooks require the webhooks:write capability (operator role or above)</td></tr>';
+                if (newBtn)
+                    newBtn.classList.add("hidden");
+                return;
+            }
+            listContainer.innerHTML = `<tr><td colspan="6" class="error-state">Failed to load webhooks: ${escapeHtml(msg)}</td></tr>`;
+            if (newBtn)
+                newBtn.classList.add("hidden");
+        }
+    }
+    function wireWebhookItemButtons(client, envId, root, items) {
+        const byId = new Map(items.map((ep) => [ep.id, ep]));
+        const findEndpoint = (el) => {
+            if (!el)
+                return undefined;
+            const id = el.getAttribute?.("data-webhook-id");
+            if (!id)
+                return undefined;
+            return byId.get(id);
+        };
+        root.querySelectorAll(".webhook-deliveries-btn").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const ep = findEndpoint(btn);
+                if (!ep)
+                    return;
+                void loadDeliveriesList(client, ep.id);
+            });
+        });
+        root.querySelectorAll(".webhook-toggle-btn").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const ep = findEndpoint(btn);
+                if (!ep)
+                    return;
+                btn.disabled = true;
+                client
+                    .updateWebhookEndpoint(ep.id, ep.revision, { enabled: !ep.enabled })
+                    .then(() => loadWebhooksList(client, envId))
+                    .catch((err) => {
+                    btn.disabled = false;
+                    renderError(new Error(err instanceof Error ? err.message : String(err)));
+                });
+            });
+        });
+        root.querySelectorAll(".webhook-rotate-btn").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const ep = findEndpoint(btn);
+                if (!ep)
+                    return;
+                if (!confirm("Are you sure you want to rotate the secret? The old secret remains valid for 24 hours.")) {
+                    return;
+                }
+                btn.disabled = true;
+                client
+                    .updateWebhookEndpoint(ep.id, ep.revision, undefined, true)
+                    .then((updated) => {
+                    const alert = document.getElementById("webhooks-secret-alert");
+                    if (alert && updated.secret) {
+                        alert.innerHTML = `<strong>Secret rotated:</strong> <code>${escapeHtml(updated.secret)}</code> (Signing Key ID: <code>${escapeHtml(updated.signingKeyId || "")}</code>). Copy it now; it cannot be shown again.`;
+                        alert.classList.remove("hidden");
+                    }
+                    return loadWebhooksList(client, envId);
+                })
+                    .catch((err) => {
+                    btn.disabled = false;
+                    renderError(new Error(err instanceof Error ? err.message : String(err)));
+                });
+            });
+        });
+        root.querySelectorAll(".webhook-delete-btn").forEach((btn) => {
+            btn.addEventListener("click", () => {
+                const ep = findEndpoint(btn);
+                if (!ep)
+                    return;
+                if (!confirm(`Are you sure you want to delete webhook ${ep.url}?`)) {
+                    return;
+                }
+                btn.disabled = true;
+                client
+                    .deleteWebhookEndpoint(ep.id, ep.revision)
+                    .then(() => loadWebhooksList(client, envId))
+                    .catch((err) => {
+                    btn.disabled = false;
+                    renderError(new Error(err instanceof Error ? err.message : String(err)));
+                });
+            });
+        });
+    }
+    async function loadDeliveriesList(client, endpointId) {
+        const panel = document.getElementById("deliveries-panel");
+        const tbody = document.getElementById("deliveries-table-body");
+        if (panel)
+            panel.classList.remove("hidden");
+        if (!tbody)
+            return;
+        tbody.innerHTML =
+            '<tr><td colspan="7" class="loading">Loading deliveries...</td></tr>';
+        try {
+            const resp = await client.listWebhookDeliveries(endpointId);
+            if (resp.items.length === 0) {
+                tbody.innerHTML =
+                    '<tr><td colspan="7" class="empty-state">No deliveries found for this endpoint.</td></tr>';
+                return;
+            }
+            tbody.innerHTML = "";
+            for (const d of resp.items) {
+                const row = document.createElement("tr");
+                const statusBadge = `<span class="badge status-${d.status.toLowerCase()}">${d.status}</span>`;
+                const redeliverBtn = canManageWebhooks &&
+                    (d.status === "FAILED" || d.status === "CANCELLED")
+                    ? `<button class="secondary-btn delivery-redeliver-btn" data-delivery-id="${escapeHtml(d.id)}">Redeliver</button>`
+                    : "";
+                row.innerHTML = `
+          <td><code>${escapeHtml(d.id)}</code></td>
+          <td>${escapeHtml(d.eventType)}</td>
+          <td>${statusBadge}</td>
+          <td>${d.attempts}</td>
+          <td>${d.lastStatusCode ? `HTTP ${d.lastStatusCode}` : escapeHtml(d.lastError || "-")}</td>
+          <td>${new Date(d.createdAt).toLocaleString()}</td>
+          <td>${redeliverBtn}</td>
+        `;
+                tbody.appendChild(row);
+            }
+            tbody.querySelectorAll(".delivery-redeliver-btn").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    const deliveryId = btn.getAttribute("data-delivery-id");
+                    if (!deliveryId)
+                        return;
+                    btn.disabled = true;
+                    client
+                        .redeliverWebhook(deliveryId)
+                        .then(() => loadDeliveriesList(client, endpointId))
+                        .catch((err) => {
+                        btn.disabled = false;
+                        renderError(new Error(err instanceof Error ? err.message : String(err)));
+                    });
+                });
+            });
+        }
+        catch (err) {
+            if (isUnauthorized(err)) {
+                handleUnauthorized();
+                return;
+            }
+            tbody.innerHTML = `<tr><td colspan="7" class="error-state">Failed to load deliveries: ${escapeHtml(err instanceof Error ? err.message : String(err))}</td></tr>`;
+        }
+    }
+    function openWebhookCreateDialog(client, envId, invoker) {
+        document.getElementById("webhook-create-dialog-overlay")?.remove();
+        const overlay = document.createElement("div");
+        overlay.className = "dialog-overlay";
+        overlay.id = "webhook-create-dialog-overlay";
+        overlay.innerHTML = `
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="webhook-create-dialog-title">
+        <h3 id="webhook-create-dialog-title">New Webhook Endpoint</h3>
+        <p class="text-muted">Register an HTTPS endpoint to receive signed webhook events.</p>
+        <label>Payload URL (HTTPS required)
+          <input id="webhook-create-url" type="url" placeholder="https://api.example.com/webhooks" autocomplete="off" />
+        </label>
+        <label>Subscribed Events (comma separated, default: all)
+          <input id="webhook-create-events" type="text" placeholder="run.succeeded, run.failed, run.cancelled, approval.requested" autocomplete="off" />
+        </label>
+        <div id="webhook-create-error" class="dialog-error" role="alert" style="display:none"></div>
+        <div class="dialog-actions">
+          <button id="webhook-create-dismiss">Cancel</button>
+          <button id="webhook-create-submit">Create webhook</button>
+        </div>
+      </div>
+    `;
+        document.body.appendChild(overlay);
+        const errorBox = overlay.querySelector("#webhook-create-error");
+        const urlInput = overlay.querySelector("#webhook-create-url");
+        const eventsInput = overlay.querySelector("#webhook-create-events");
+        const submitBtn = overlay.querySelector("#webhook-create-submit");
+        const showError = (msg) => {
+            errorBox.textContent = msg;
+            errorBox.style.display = "block";
+        };
+        const close = () => {
+            overlay.remove();
+            invoker?.focus();
+        };
+        overlay.querySelector("#webhook-create-dismiss").addEventListener("click", close);
+        overlay.addEventListener("keydown", (e) => {
+            if (e.key === "Escape")
+                close();
+        });
+        overlay.addEventListener("mousedown", (e) => {
+            if (e.target === overlay)
+                close();
+        });
+        urlInput.focus();
+        submitBtn.addEventListener("click", () => {
+            const url = urlInput.value.trim();
+            if (!url) {
+                showError("URL is required");
+                urlInput.focus();
+                return;
+            }
+            const rawEvents = eventsInput.value.trim();
+            let eventTypes = [];
+            if (rawEvents) {
+                eventTypes = rawEvents
+                    .split(",")
+                    .map((s) => s.trim())
+                    .filter(Boolean);
+            }
+            else {
+                eventTypes = [
+                    "run.succeeded",
+                    "run.failed",
+                    "run.cancelled",
+                    "approval.requested",
+                ];
+            }
+            submitBtn.disabled = true;
+            client
+                .createWebhookEndpoint(envId, url, eventTypes, true)
+                .then((ep) => {
+                close();
+                const alert = document.getElementById("webhooks-secret-alert");
+                if (alert && ep.secret) {
+                    alert.innerHTML = `<strong>Webhook created:</strong> <code>${escapeHtml(ep.secret)}</code> (Signing Key ID: <code>${escapeHtml(ep.signingKeyId || "")}</code>). Save this secret now; it cannot be shown again.`;
+                    alert.classList.remove("hidden");
+                }
+                return loadWebhooksList(client, envId);
+            })
+                .catch((err) => {
+                submitBtn.disabled = false;
                 showError(err instanceof Error ? err.message : String(err));
             });
         });

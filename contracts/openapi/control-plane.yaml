@@ -1457,7 +1457,7 @@ paths:
             Select a verified member environment for browser sessions. Must
             match authoritative environment scope for an API key.
       x-required-capability: webhooks:write
-      x-implemented: false
+      x-implemented: true
       responses:
         "200":
           description: Committed response
@@ -1517,7 +1517,7 @@ paths:
             Select a verified member environment for browser sessions. Must
             match authoritative environment scope for an API key.
       x-required-capability: webhooks:write
-      x-implemented: false
+      x-implemented: true
       responses:
         "200":
           description: Committed response
@@ -1566,7 +1566,7 @@ paths:
           schema: *a1
           description: Required for browser-session mutations with validated Origin.
       x-required-capability: webhooks:write
-      x-implemented: false
+      x-implemented: true
       responses:
         "200":
           description: Committed response
@@ -1622,7 +1622,7 @@ paths:
           schema: *a1
           description: Required for browser-session mutations with validated Origin.
       x-required-capability: webhooks:write
-      x-implemented: false
+      x-implemented: true
       responses:
         "200":
           description: Committed response
@@ -2895,6 +2895,10 @@ components:
               - run.failed
               - run.cancelled
               - approval.requested
+        secret:
+          type: string
+        signingKeyId:
+          type: string
       required:
         - url
         - enabled

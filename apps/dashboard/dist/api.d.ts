@@ -1,4 +1,4 @@
-import { Run, Worker, RunSnapshot, RunEventsResponse, TaskLogsResponse, ResolveReconciliationRequest, ResolveReconciliationResponse, Approval, Schedule, ScheduleOccurrence } from "./types.js";
+import { Run, Worker, RunSnapshot, RunEventsResponse, TaskLogsResponse, ResolveReconciliationRequest, ResolveReconciliationResponse, Approval, Schedule, ScheduleOccurrence, WebhookEndpoint, WebhookDelivery } from "./types.js";
 export interface ListRunsResponse {
     items: Run[];
     nextCursor?: string | null;
@@ -119,5 +119,21 @@ export declare class DashboardApiClient {
     listProjects(): Promise<ProjectSummary[]>;
     listProjectEnvironments(projectId: string): Promise<EnvironmentSummary[]>;
     loadEnvironmentCatalog(): Promise<CatalogEnvironment[]>;
+    listWebhookEndpoints(environmentId: string, limit?: number, cursor?: string): Promise<{
+        items: WebhookEndpoint[];
+        nextCursor?: string | null;
+    }>;
+    createWebhookEndpoint(environmentId: string, url: string, eventTypes: string[], enabled?: boolean): Promise<WebhookEndpoint>;
+    updateWebhookEndpoint(endpointId: string, expectedRevision: number, config?: {
+        url?: string;
+        enabled?: boolean;
+        eventTypes?: string[];
+    }, rotateSecret?: boolean): Promise<WebhookEndpoint>;
+    deleteWebhookEndpoint(endpointId: string, expectedRevision: number): Promise<void>;
+    listWebhookDeliveries(endpointId: string, limit?: number, cursor?: string): Promise<{
+        items: WebhookDelivery[];
+        nextCursor?: string | null;
+    }>;
+    redeliverWebhook(deliveryId: string): Promise<WebhookDelivery>;
 }
 //# sourceMappingURL=api.d.ts.map
