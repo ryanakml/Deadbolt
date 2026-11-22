@@ -6,7 +6,7 @@ export * from "./permissions.js";
 import { DashboardApiClient, isUnauthorized, isConflict, newIdempotencyKey, } from "./api.js";
 import { createEnvironmentSelection, formatEnvironmentLabel, getSelectedEnvironmentId, selectEnvironment, setSelectionCatalog, setSelectionOrganization, } from "./api.js";
 import { resolveOrgState } from "./auth.js";
-import { sessionCanControlRuns, sessionCanDecideApprovals, sessionCanManageSchedules, visibleRunControls, } from "./permissions.js";
+import { sessionCanControlRuns, sessionCanDecideApprovals, sessionCanDrainWorkers, sessionCanManageSchedules, visibleRunControls, visibleRerunControl, } from "./permissions.js";
 import { RunInspector } from "./inspector.js";
 import { shouldShowWorkerWait, terminalStepEmptyText, openCaseForStep, reconciliationHoldText, terminationBannerText, RESOLVE_ACTIONS, getStatusPresentation, computeGraphLayout, computeMinimap, filterEventsForStep, virtualizeItems, getBoundedEvents, } from "./inspector.js";
 import { clearStreamErrorOnLive, createStreamErrorBanner, markGlobalError, markStreamError, } from "./stream.js";
@@ -35,6 +35,7 @@ function initDashboard() {
     // this flag allows them. It must not be inferred from runs:control:
     // developer holds runs:control but never schedules:write.
     let canManageSchedules = false;
+    let canDrainWorkers = false;
     // Active view id so the environment selector can refresh the schedules
     // list only when the schedules view is showing. Unconditional refreshes
     // would issue protected requests the current view never asked for.
@@ -60,12 +61,19 @@ function initDashboard() {
     const runsNavBtn = document.getElementById("nav-runs");
     const workersNavBtn = document.getElementById("nav-workers");
     const schedulesNavBtn = document.getElementById("nav-schedules");
+    const deploymentsNavBtn = document.getElementById("nav-deployments");
     if (envSelect) {
         envSelect.addEventListener("change", () => {
             selectEnvironment(envSelection, envSelect.value || null);
             loadRunsList(api, getSelectedEnvironmentId(envSelection));
             if (activeViewId === "schedules-view") {
                 loadSchedulesList(api, getSelectedEnvironmentId(envSelection));
+            }
+            else if (activeViewId === "workers-view") {
+                loadWorkersList(api, getSelectedEnvironmentId(envSelection));
+            }
+            else if (activeViewId === "deployments-view") {
+                loadDeploymentsList(api, getSelectedEnvironmentId(envSelection));
             }
         });
     }
@@ -99,6 +107,12 @@ function initDashboard() {
         schedulesNavBtn.addEventListener("click", () => {
             showView("schedules-view");
             loadSchedulesList(api, getSelectedEnvironmentId(envSelection));
+        });
+    }
+    if (deploymentsNavBtn) {
+        deploymentsNavBtn.addEventListener("click", () => {
+            showView("deployments-view");
+            loadDeploymentsList(api, getSelectedEnvironmentId(envSelection));
         });
     }
     const schedulesNewBtn = document.getElementById("schedules-new-btn");
@@ -180,6 +194,7 @@ function initDashboard() {
         // operator, admin, and owner and withheld from developer, so it must not
         // be inferred from runs:control either.
         canManageSchedules = sessionCanManageSchedules(session, orgId);
+        canDrainWorkers = sessionCanDrainWorkers(session, orgId);
         await loadEnvironmentCatalog(orgId);
         if (runIdParam) {
             inspectRun(runIdParam);
@@ -351,6 +366,7 @@ function initDashboard() {
         canControlRuns = false;
         canDecideApprovals = false;
         canManageSchedules = false;
+        canDrainWorkers = false;
         activeViewId = "runs-view";
         clearEnvironmentState();
         for (const id of ["runs-table-body", "workers-table-body"]) {
@@ -459,12 +475,63 @@ function initDashboard() {
                         .map((d) => `<code class="digest-tag">${escapeHtml(d.slice(0, 16))}...</code>`)
                         .join(" ")
                     : '<span class="text-muted">(none)</span>';
+                let actionsHtml = '<span class="text-muted">-</span>';
+                if (canDrainWorkers) {
+                    if (worker.status === "ACTIVE") {
+                        actionsHtml = `
+              <button class="secondary-btn btn-sm drain-worker-btn" data-worker-id="${escapeHtml(worker.id)}">Drain</button>
+              <button class="danger-btn btn-sm revoke-worker-btn" data-worker-id="${escapeHtml(worker.id)}">Revoke</button>
+            `;
+                    }
+                    else if (worker.status === "DRAINING") {
+                        actionsHtml = `
+              <button class="danger-btn btn-sm revoke-worker-btn" data-worker-id="${escapeHtml(worker.id)}">Revoke</button>
+            `;
+                    }
+                }
                 row.innerHTML = `
           <td><code>${worker.id}</code></td>
           <td>${escapeHtml(worker.pool)}</td>
           <td><span class="badge status-${worker.status.toLowerCase()}">${worker.status}</span></td>
           <td>${digests}</td>
+          <td>${actionsHtml}</td>
         `;
+                row
+                    .querySelector(".drain-worker-btn")
+                    ?.addEventListener("click", async (e) => {
+                    const btn = e.currentTarget;
+                    const wId = btn.getAttribute("data-worker-id");
+                    if (!wId ||
+                        !confirm(`Drain worker ${wId}? The worker will finish active attempts and claim no new work.`))
+                        return;
+                    btn.disabled = true;
+                    try {
+                        await client.drainWorker(wId);
+                        await loadWorkersList(client, envId);
+                    }
+                    catch (err) {
+                        alert(`Failed to drain worker: ${err instanceof Error ? err.message : String(err)}`);
+                        btn.disabled = false;
+                    }
+                });
+                row
+                    .querySelector(".revoke-worker-btn")
+                    ?.addEventListener("click", async (e) => {
+                    const btn = e.currentTarget;
+                    const wId = btn.getAttribute("data-worker-id");
+                    if (!wId ||
+                        !confirm(`Revoke worker ${wId}? This will immediately terminate its active sessions and leases.`))
+                        return;
+                    btn.disabled = true;
+                    try {
+                        await client.revokeWorker(wId);
+                        await loadWorkersList(client, envId);
+                    }
+                    catch (err) {
+                        alert(`Failed to revoke worker: ${err instanceof Error ? err.message : String(err)}`);
+                        btn.disabled = false;
+                    }
+                });
                 listContainer.appendChild(row);
             }
         }
@@ -474,6 +541,84 @@ function initDashboard() {
                 return;
             }
             listContainer.innerHTML = `<tr><td colspan="4" class="error-state">Failed to load workers: ${escapeHtml(err instanceof Error ? err.message : String(err))}</td></tr>`;
+        }
+    }
+    async function loadDeploymentsList(client, envId) {
+        const listContainer = document.getElementById("deployments-table-body");
+        if (!listContainer)
+            return;
+        if (!envId) {
+            renderEnvironmentEmptyState();
+            return;
+        }
+        listContainer.innerHTML =
+            '<tr><td colspan="6" class="loading">Loading deployments...</td></tr>';
+        try {
+            const [depResp, wfResp] = await Promise.all([
+                client.listDeployments(envId),
+                client.listWorkflows(envId),
+            ]);
+            const activeDeployments = new Set();
+            for (const wf of wfResp.items) {
+                if (wf.activeDeploymentId) {
+                    activeDeployments.add(wf.activeDeploymentId);
+                }
+            }
+            if (depResp.items.length === 0) {
+                listContainer.innerHTML =
+                    '<tr><td colspan="6" class="empty-state">No deployments registered for this environment.</td></tr>';
+                return;
+            }
+            listContainer.innerHTML = "";
+            for (const dep of depResp.items) {
+                const row = document.createElement("tr");
+                const isActive = activeDeployments.has(dep.id);
+                const statusBadge = isActive
+                    ? '<span class="badge status-active">ACTIVE</span>'
+                    : `<span class="badge status-${dep.status.toLowerCase()}">${dep.status}</span>`;
+                let warningHtml = '<span class="text-muted">None</span>';
+                if (dep.compatibilityWarningAt) {
+                    warningHtml =
+                        '<span class="badge status-failed" title="No live workers advertising this bundle">COMPATIBILITY LOST</span>';
+                }
+                let actionHtml = '<span class="text-muted">-</span>';
+                if (!isActive) {
+                    actionHtml = `<button class="danger-btn btn-sm delete-dep-btn" data-dep-id="${escapeHtml(dep.id)}">Delete</button>`;
+                }
+                row.innerHTML = `
+          <td><code>${escapeHtml(dep.id.slice(0, 8))}...</code></td>
+          <td><code class="digest-tag">${escapeHtml(dep.bundleDigest.slice(0, 16))}...</code></td>
+          <td>${statusBadge}</td>
+          <td>${warningHtml}</td>
+          <td>${new Date(dep.createdAt).toLocaleString()}</td>
+          <td>${actionHtml}</td>
+        `;
+                row
+                    .querySelector(".delete-dep-btn")
+                    ?.addEventListener("click", async (e) => {
+                    const btn = e.currentTarget;
+                    const dId = btn.getAttribute("data-dep-id");
+                    if (!dId || !confirm(`Delete unreferenced deployment ${dId}?`))
+                        return;
+                    btn.disabled = true;
+                    try {
+                        await client.deleteDeployment(envId, dId);
+                        await loadDeploymentsList(client, envId);
+                    }
+                    catch (err) {
+                        alert(`Failed to delete deployment: ${err instanceof Error ? err.message : String(err)}`);
+                        btn.disabled = false;
+                    }
+                });
+                listContainer.appendChild(row);
+            }
+        }
+        catch (err) {
+            if (isUnauthorized(err)) {
+                handleUnauthorized();
+                return;
+            }
+            listContainer.innerHTML = `<tr><td colspan="6" class="error-state">Failed to load deployments: ${escapeHtml(err instanceof Error ? err.message : String(err))}</td></tr>`;
         }
     }
     async function loadSchedulesList(client, envId) {
@@ -1549,6 +1694,7 @@ function initDashboard() {
             ${controls.pause ? `<button id="pause-run-btn" class="secondary-btn">Pause run</button>` : ""}
             ${controls.resume ? `<button id="resume-run-btn" class="primary-btn">Resume run</button>` : ""}
             ${controls.cancel ? `<button id="cancel-run-btn" class="danger-btn">Cancel run</button>` : ""}
+            ${visibleRerunControl(snap.status, canControlRuns) ? `<button id="rerun-run-btn" class="secondary-btn">Rerun</button>` : ""}
           </div>
         </div>
 
@@ -1901,6 +2047,12 @@ function initDashboard() {
             if (resumeBtn) {
                 resumeBtn.addEventListener("click", (e) => {
                     openResumeDialog(api, snap, e.currentTarget);
+                });
+            }
+            const rerunBtn = document.getElementById("rerun-run-btn");
+            if (rerunBtn) {
+                rerunBtn.addEventListener("click", (e) => {
+                    openRerunDialog(api, snap, e.currentTarget);
                 });
             }
             // Wire durable cancellation. The backend stays authoritative:
@@ -2481,6 +2633,80 @@ function initDashboard() {
                 errorBox.style.display = "block";
             });
         });
+    }
+    function closeRerunDialog() {
+        const existing = document.getElementById("rerun-dialog-overlay");
+        if (existing)
+            existing.remove();
+    }
+    function openRerunDialog(api, snap, invoker) {
+        closeRerunDialog();
+        const overlay = document.createElement("div");
+        overlay.className = "dialog-overlay";
+        overlay.id = "rerun-dialog-overlay";
+        const initialInput = JSON.stringify(snap.input ?? {}, null, 2);
+        overlay.innerHTML = `
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="rerun-dialog-title">
+        <h3 id="rerun-dialog-title">Rerun workflow — ${escapeHtml(snap.workflowName)}</h3>
+        <p class="text-warning"><strong>Side-effect warning:</strong> A rerun creates a new independent run from the beginning with new operation IDs. External effects previously performed by this run will not be skipped and may be repeated.</p>
+        <div class="dialog-field" style="margin-bottom:12px;">
+          <label for="rerun-deployment-id" style="display:block;margin-bottom:4px;font-weight:500;">Deployment:</label>
+          <input id="rerun-deployment-id" type="text" value="${escapeHtml(snap.deploymentId)}" placeholder="Deployment UUID" style="width:100%;padding:6px;box-sizing:border-box;" />
+          <small class="text-muted">Defaults to original run deployment (<code>${escapeHtml(snap.deploymentId.slice(0, 8))}...</code>)</small>
+        </div>
+        <div class="dialog-field" style="margin-bottom:12px;">
+          <label for="rerun-input-editor" style="display:block;margin-bottom:4px;font-weight:500;">Workflow Input (JSON):</label>
+          <textarea id="rerun-input-editor" rows="5" style="width:100%;font-family:monospace;padding:6px;box-sizing:border-box;">${escapeHtml(initialInput)}</textarea>
+        </div>
+        <div id="rerun-error" class="dialog-error" role="alert" style="display:none;color:#dc2626;margin-bottom:12px;"></div>
+        <div class="dialog-actions">
+          <button id="rerun-dismiss" class="secondary-btn">Cancel</button>
+          <button id="rerun-confirm" class="primary-btn">Confirm Rerun</button>
+        </div>
+      </div>
+    `;
+        document.body.appendChild(overlay);
+        const idempotencyKey = newIdempotencyKey();
+        const errorBox = overlay.querySelector("#rerun-error");
+        const confirmBtn = overlay.querySelector("#rerun-confirm");
+        const depInput = overlay.querySelector("#rerun-deployment-id");
+        const inputArea = overlay.querySelector("#rerun-input-editor");
+        const close = () => {
+            overlay.remove();
+            invoker?.focus();
+        };
+        overlay.querySelector("#rerun-dismiss")?.addEventListener("click", close);
+        overlay.addEventListener("keydown", (e) => {
+            if (e.key === "Escape")
+                close();
+        });
+        confirmBtn.addEventListener("click", async () => {
+            errorBox.style.display = "none";
+            let parsedInput;
+            try {
+                parsedInput = JSON.parse(inputArea.value.trim() || "{}");
+            }
+            catch (err) {
+                errorBox.textContent = `Invalid input JSON: ${err instanceof Error ? err.message : String(err)}`;
+                errorBox.style.display = "block";
+                return;
+            }
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = "Submitting rerun...";
+            try {
+                const depIdVal = depInput.value.trim() || snap.deploymentId;
+                const newRun = await api.rerunRun(snap.id, { deploymentId: depIdVal, input: parsedInput }, idempotencyKey);
+                close();
+                inspectRun(newRun.id);
+            }
+            catch (err) {
+                errorBox.textContent = `Rerun failed: ${err instanceof Error ? err.message : String(err)}`;
+                errorBox.style.display = "block";
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = "Confirm Rerun";
+            }
+        });
+        confirmBtn.focus();
     }
     function closeCancelDialog() {
         document.getElementById("cancel-dialog-overlay")?.remove();

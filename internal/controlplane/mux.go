@@ -69,6 +69,12 @@ func BuildMuxWithComponents(cfg auth.Config, pool *pgxpool.Pool, healthChecker *
 		// scoped auth, environment isolation, and durable command idempotency.
 		mux.Handle("POST /api/v1/workflows/{name}/activate", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope("", deploymentHandler.Activate))))
 		mux.Handle("POST /v1/workflows/{name}/activate", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope("", deploymentHandler.Activate))))
+		mux.Handle("GET /api/v1/deployments", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope(tenant.CapDeploymentsRegister, deploymentHandler.List))))
+		mux.Handle("GET /v1/deployments", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope(tenant.CapDeploymentsRegister, deploymentHandler.List))))
+		mux.Handle("DELETE /api/v1/deployments/{id}", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope(tenant.CapDeploymentsRegister, deploymentHandler.Delete))))
+		mux.Handle("DELETE /v1/deployments/{id}", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope(tenant.CapDeploymentsRegister, deploymentHandler.Delete))))
+		mux.Handle("GET /api/v1/workflows", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope(tenant.CapWorkflowsRead, deploymentHandler.ListWorkflows))))
+		mux.Handle("GET /v1/workflows", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope(tenant.CapWorkflowsRead, deploymentHandler.ListWorkflows))))
 
 		eventHub := hub
 		if eventHub == nil {
@@ -107,6 +113,8 @@ func BuildMuxWithComponents(cfg auth.Config, pool *pgxpool.Pool, healthChecker *
 		mux.Handle("POST /v1/runs/{id}/pause", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope(tenant.CapRunsControl, executionHandler.PauseRun))))
 		mux.Handle("POST /api/v1/runs/{id}/resume", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope(tenant.CapRunsControl, executionHandler.ResumeRun))))
 		mux.Handle("POST /v1/runs/{id}/resume", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope(tenant.CapRunsControl, executionHandler.ResumeRun))))
+		mux.Handle("POST /api/v1/runs/{id}/rerun", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope(tenant.CapRunsCreate, executionHandler.Rerun))))
+		mux.Handle("POST /v1/runs/{id}/rerun", tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope(tenant.CapRunsCreate, executionHandler.Rerun))))
 
 		// Approval control nodes (Blueprint §16.3, §20.1). A decision requires
 		// an identifiable human holding approvals:decide; the handler refuses

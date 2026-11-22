@@ -484,6 +484,184 @@ export class DashboardApiClient {
     return res.json() as Promise<Run>;
   }
 
+  // rerunRun creates a new run from an existing run.
+  public async rerunRun(
+    runId: string,
+    options: { deploymentId?: string; input?: unknown },
+    idempotencyKey?: string,
+  ): Promise<Run> {
+    const body: Record<string, unknown> = {};
+    if (options.deploymentId !== undefined) {
+      body.deploymentId = options.deploymentId;
+    }
+    if (options.input !== undefined) {
+      body.input = options.input;
+    }
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/runs/${encodeURIComponent(runId)}/rerun`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": readCsrfToken(),
+          "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Failed to rerun run (HTTP ${res.status}): ${res.statusText}`,
+      );
+    }
+    return res.json() as Promise<Run>;
+  }
+
+  // drainWorker requests graceful drain of an active worker.
+  public async drainWorker(
+    workerId: string,
+    idempotencyKey?: string,
+  ): Promise<void> {
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/workers/${encodeURIComponent(workerId)}/drain`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": readCsrfToken(),
+          "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+        },
+      },
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Failed to drain worker (HTTP ${res.status}): ${res.statusText}`,
+      );
+    }
+  }
+
+  // revokeWorker immediately revokes a worker and its sessions.
+  public async revokeWorker(
+    workerId: string,
+    idempotencyKey?: string,
+  ): Promise<void> {
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/workers/${encodeURIComponent(workerId)}/revoke`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": readCsrfToken(),
+          "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+        },
+      },
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Failed to revoke worker (HTTP ${res.status}): ${res.statusText}`,
+      );
+    }
+  }
+
+  // listDeployments lists registered deployments for the environment.
+  public async listDeployments(
+    environmentId: string,
+    limit?: number,
+    cursor?: string,
+  ): Promise<{ items: any[]; nextCursor: string | null }> {
+    const params = new URLSearchParams({ environment: environmentId });
+    if (limit) params.set("limit", String(limit));
+    if (cursor) params.set("cursor", cursor);
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/deployments?${params.toString()}`,
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Failed to list deployments (HTTP ${res.status}): ${res.statusText}`,
+      );
+    }
+    return res.json();
+  }
+
+  // deleteDeployment deletes an unreferenced deployment registration.
+  public async deleteDeployment(
+    environmentId: string,
+    deploymentId: string,
+    idempotencyKey?: string,
+  ): Promise<void> {
+    const params = new URLSearchParams({ environment: environmentId });
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/deployments/${encodeURIComponent(deploymentId)}?${params.toString()}`,
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": readCsrfToken(),
+          "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+        },
+      },
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Failed to delete deployment (HTTP ${res.status}): ${res.statusText}`,
+      );
+    }
+  }
+
+  // listWorkflows lists workflow channels and active deployments.
+  public async listWorkflows(
+    environmentId: string,
+    limit?: number,
+    cursor?: string,
+  ): Promise<{ items: any[]; nextCursor: string | null }> {
+    const params = new URLSearchParams({ environment: environmentId });
+    if (limit) params.set("limit", String(limit));
+    if (cursor) params.set("cursor", cursor);
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/workflows?${params.toString()}`,
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Failed to list workflows (HTTP ${res.status}): ${res.statusText}`,
+      );
+    }
+    return res.json();
+  }
+
+  // activateWorkflow activates or rolls back a workflow deployment.
+  public async activateWorkflow(
+    environmentId: string,
+    workflowName: string,
+    deploymentId: string,
+    expectedRevision: number,
+    allowSingleWorker?: boolean,
+    idempotencyKey?: string,
+  ): Promise<any> {
+    const params = new URLSearchParams({ environment: environmentId });
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/workflows/${encodeURIComponent(workflowName)}/activate?${params.toString()}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": readCsrfToken(),
+          "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+        },
+        body: JSON.stringify({
+          deploymentId,
+          expectedRevision,
+          allowSingleWorker: allowSingleWorker ?? false,
+        }),
+      },
+    );
+    if (!res.ok) {
+      throw new Error(
+        `Failed to activate workflow deployment (HTTP ${res.status}): ${res.statusText}`,
+      );
+    }
+    return res.json();
+  }
+
   // listSchedules returns the schedule definitions for the selected
   // environment. The backend requires the schedules:write capability; a 403
   // means the identity lacks it and the dashboard renders a capability

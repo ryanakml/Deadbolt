@@ -158,6 +158,78 @@ func (h *HTTPHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, run)
 }
 
+func (h *HTTPHandler) Rerun(w http.ResponseWriter, r *http.Request) {
+	caller, ok := tenant.CallerFromContext(r.Context())
+	if !ok {
+		errJSON(w, r, http.StatusUnauthorized, "UNAUTHENTICATED", "Authentication required")
+		return
+	}
+
+	runID := r.PathValue("id")
+	if runID == "" {
+		errJSON(w, r, http.StatusBadRequest, "INVALID_REQUEST", "run id is required")
+		return
+	}
+
+	var in struct {
+		Input        any     `json:"input"`
+		DeploymentID *string `json:"deploymentId"`
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, 2<<20)
+	data, err := io.ReadAll(r.Body)
+	if err != nil {
+		errJSON(w, r, http.StatusBadRequest, "INVALID_REQUEST", "Failed to read body")
+		return
+	}
+	if len(bytes.TrimSpace(data)) > 0 {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(&in); err != nil {
+			errJSON(w, r, http.StatusBadRequest, "INVALID_REQUEST", "Malformed JSON body")
+			return
+		}
+	}
+
+	idempKey := r.Header.Get("Idempotency-Key")
+	if idempKey == "" {
+		idempKey = r.URL.Query().Get("idempotencyKey")
+	}
+	if idempKey == "" {
+		errJSON(w, r, http.StatusBadRequest, "MISSING_IDEMPOTENCY_KEY", "Idempotency-Key header is required")
+		return
+	}
+
+	run, _, err := h.service.Rerun(r.Context(), caller.OrganizationID, runID, idempKey, in.DeploymentID, in.Input, auditFromCaller(caller, r))
+	if err != nil {
+		if errors.Is(err, ErrRunNotFound) {
+			errJSON(w, r, http.StatusNotFound, "NOT_FOUND", "Run not found")
+			return
+		}
+		if errors.Is(err, ErrIdempotencyConflict) {
+			errJSON(w, r, http.StatusConflict, "IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD", "Idempotency key already used with different payload")
+			return
+		}
+		if errors.Is(err, ErrDeploymentNotFound) {
+			errJSON(w, r, http.StatusNotFound, "DEPLOYMENT_NOT_FOUND", "Specified deployment was not found")
+			return
+		}
+		if errors.Is(err, ErrRunQuotaExceeded) {
+			w.Header().Set("Retry-After", "60")
+			errJSON(w, r, http.StatusTooManyRequests, "RUN_QUOTA_EXCEEDED", "Environment has reached the nonterminal run limit")
+			return
+		}
+		if errors.Is(err, ErrCreateRateLimited) {
+			w.Header().Set("Retry-After", "1")
+			errJSON(w, r, http.StatusTooManyRequests, "CREATE_RUN_RATE_LIMITED", "Run creation rate exceeded; retry shortly")
+			return
+		}
+		errJSON(w, r, http.StatusInternalServerError, "INTERNAL_ERROR", "Internal server error")
+		return
+	}
+
+	writeJSON(w, http.StatusAccepted, run)
+}
+
 func (h *HTTPHandler) GetRun(w http.ResponseWriter, r *http.Request) {
 	caller, ok := tenant.CallerFromContext(r.Context())
 	if !ok {

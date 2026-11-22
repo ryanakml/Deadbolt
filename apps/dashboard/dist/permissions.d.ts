@@ -15,4 +15,8 @@ export interface RunControlVisibility {
     cancel: boolean;
 }
 export declare function visibleRunControls(status: RunStatus, canControl: boolean): RunControlVisibility;
+export declare const WORKERS_DRAIN_CAPABILITY = "workers:drain";
+export declare function roleCanDrainWorkers(role: string | null | undefined): boolean;
+export declare function sessionCanDrainWorkers(session: AuthSession | null | undefined, orgId: string | null | undefined): boolean;
+export declare function visibleRerunControl(status: RunStatus, canControl: boolean): boolean;
 //# sourceMappingURL=permissions.d.ts.map

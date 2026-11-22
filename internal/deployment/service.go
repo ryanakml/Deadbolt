@@ -3,6 +3,7 @@ package deployment
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -13,21 +14,24 @@ import (
 	"github.com/Ryanakml/Deadbolt/internal/storage"
 	"github.com/Ryanakml/Deadbolt/internal/tenant"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var (
-	ErrNotFound  = errors.New("NOT_FOUND")
-	ErrConflict  = errors.New("REVISION_CONFLICT")
-	ErrImmutable = errors.New("IMMUTABLE_CONTENT_CONFLICT")
-	ErrPreflight = errors.New("WORKER_PREFLIGHT_FAILED")
+	ErrNotFound   = errors.New("NOT_FOUND")
+	ErrConflict   = errors.New("REVISION_CONFLICT")
+	ErrImmutable  = errors.New("IMMUTABLE_CONTENT_CONFLICT")
+	ErrPreflight  = errors.New("WORKER_PREFLIGHT_FAILED")
+	ErrReferenced = errors.New("DEPLOYMENT_REFERENCED")
 )
 
 type Deployment struct {
-	ID           string    `json:"id"`
-	ManifestHash string    `json:"manifestHash"`
-	BundleDigest string    `json:"bundleDigest"`
-	Status       string    `json:"status"`
-	CreatedAt    time.Time `json:"createdAt"`
+	ID                     string     `json:"id"`
+	ManifestHash           string     `json:"manifestHash"`
+	BundleDigest           string     `json:"bundleDigest"`
+	Status                 string     `json:"status"`
+	CompatibilityWarningAt *time.Time `json:"compatibilityWarningAt,omitempty"`
+	CreatedAt              time.Time  `json:"createdAt"`
 }
 type Workflow struct {
 	Name               string  `json:"name"`
@@ -300,4 +304,217 @@ func (s *Service) Activate(ctx context.Context, orgID, envID, name, deploymentID
 		return err
 	}, func() any { return &out }, func(raw json.RawMessage) error { return json.Unmarshal(raw, &out) })
 	return &out, err
+}
+
+// ReconcileAvailabilityTx is an exported version of reconcileAvailabilityTx for callers
+// who already hold a tenant transaction (e.g. worker drain/revoke).
+func (s *Service) ReconcileAvailabilityTx(ctx context.Context, tx storage.Tx, orgID, envID string) error {
+	return reconcileAvailabilityTx(ctx, tx, orgID, envID)
+}
+
+func formatDeploymentCursor(t time.Time, id string) string {
+	return base64.RawURLEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", t.UTC().Format(time.RFC3339Nano), id)))
+}
+
+func parseDeploymentCursor(raw string) (time.Time, string, error) {
+	b, err := base64.RawURLEncoding.DecodeString(raw)
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("invalid cursor: %w", err)
+	}
+	parts := strings.SplitN(string(b), ":", 2)
+	if len(parts) != 2 {
+		return time.Time{}, "", errors.New("invalid cursor format")
+	}
+	t, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("invalid cursor timestamp: %w", err)
+	}
+	return t, parts[1], nil
+}
+
+func (s *Service) ListDeployments(ctx context.Context, orgID, envID string, limit int, cursor string) ([]Deployment, *string, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	var items []Deployment
+	var nextCursor *string
+
+	err := s.pool.WithTenantReadOnlyRepeatableReadTx(ctx, orgID, func(ctx context.Context, tx storage.Tx) error {
+		var rows pgx.Rows
+		var err error
+		if cursor != "" {
+			cursorTime, cursorID, parseErr := parseDeploymentCursor(cursor)
+			if parseErr != nil {
+				return parseErr
+			}
+			rows, err = tx.Query(ctx, `SELECT id::text, manifest_hash, bundle_digest, status, created_at, compatibility_warning_at
+				FROM deployments
+				WHERE organization_id=$1::uuid AND environment_id=$2::uuid
+				  AND (created_at, id) < ($3, $4::uuid)
+				ORDER BY created_at DESC, id DESC
+				LIMIT $5`, orgID, envID, cursorTime, cursorID, limit+1)
+		} else {
+			rows, err = tx.Query(ctx, `SELECT id::text, manifest_hash, bundle_digest, status, created_at, compatibility_warning_at
+				FROM deployments
+				WHERE organization_id=$1::uuid AND environment_id=$2::uuid
+				ORDER BY created_at DESC, id DESC
+				LIMIT $3`, orgID, envID, limit+1)
+		}
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var d Deployment
+			var warningAt *time.Time
+			if err := rows.Scan(&d.ID, &d.ManifestHash, &d.BundleDigest, &d.Status, &d.CreatedAt, &warningAt); err != nil {
+				return err
+			}
+			d.CompatibilityWarningAt = warningAt
+			items = append(items, d)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		if len(items) > limit {
+			last := items[limit-1]
+			nc := formatDeploymentCursor(last.CreatedAt, last.ID)
+			nextCursor = &nc
+			items = items[:limit]
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if items == nil {
+		items = []Deployment{}
+	}
+	return items, nextCursor, nil
+}
+
+func (s *Service) DeleteDeployment(ctx context.Context, orgID, envID, deploymentID string, audit *tenant.AuditContext) error {
+	if audit == nil {
+		return tenant.ErrAuditRequired
+	}
+	_, err := s.commands.WithCommandTx(ctx, orgID, "", 204, func(ctx context.Context, tx storage.Tx) error {
+		var exists bool
+		err := tx.QueryRow(ctx, `SELECT true FROM deployments WHERE id=$1::uuid AND organization_id=$2::uuid AND environment_id=$3::uuid`, deploymentID, orgID, envID).Scan(&exists)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+
+		// 1. Check if referenced by active channels
+		var activeCount int
+		err = tx.QueryRow(ctx, `SELECT count(*) FROM workflow_channels WHERE organization_id=$1::uuid AND environment_id=$2::uuid AND active_deployment_id=$3::uuid`, orgID, envID, deploymentID).Scan(&activeCount)
+		if err != nil {
+			return err
+		}
+		if activeCount > 0 {
+			return ErrReferenced
+		}
+
+		// 2. Check if referenced by historical runs
+		var runCount int
+		err = tx.QueryRow(ctx, `SELECT count(*) FROM runs WHERE organization_id=$1::uuid AND deployment_id=$2::uuid`, orgID, deploymentID).Scan(&runCount)
+		if err != nil {
+			return err
+		}
+		if runCount > 0 {
+			return ErrReferenced
+		}
+
+		// 3. Delete deployment row (cascades to definitions)
+		tag, err := tx.Exec(ctx, `DELETE FROM deployments WHERE id=$1::uuid AND organization_id=$2::uuid AND environment_id=$3::uuid`, deploymentID, orgID, envID)
+		if err != nil {
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" {
+				return ErrReferenced
+			}
+			return err
+		}
+		if tag.RowsAffected() == 0 {
+			return ErrNotFound
+		}
+
+		if _, err = tx.Exec(ctx, `INSERT INTO outbox_events (organization_id,subject,payload) VALUES ($1,'deployment.deleted',jsonb_build_object('deploymentId',$2::text,'environmentId',$3::text))`, orgID, deploymentID, envID); err != nil {
+			return err
+		}
+		meta, _ := json.Marshal(map[string]any{"role": audit.Role, "capabilities": audit.Capabilities, "environment_id": envID})
+		_, err = tx.Exec(ctx, `INSERT INTO audit_events (organization_id,actor_id,action,target_type,target_id,correlation_id,reason,metadata) VALUES ($1,$2,'deployment.delete','deployment',$3,$4,$5,$6::jsonb)`, orgID, audit.ActorID, deploymentID, audit.CorrelationID, audit.Reason, meta)
+		return err
+	}, func() any { return nil }, func(raw json.RawMessage) error { return nil })
+	return err
+}
+
+func (s *Service) ListWorkflows(ctx context.Context, orgID, envID string, limit int, cursor string) ([]Workflow, *string, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 25
+	}
+	var items []Workflow
+	var nextCursor *string
+
+	err := s.pool.WithTenantReadOnlyRepeatableReadTx(ctx, orgID, func(ctx context.Context, tx storage.Tx) error {
+		var rows pgx.Rows
+		var err error
+		if cursor != "" {
+			rows, err = tx.Query(ctx, `SELECT c.workflow_name, c.active_deployment_id::text, c.revision,
+				CASE WHEN d.compatibility_warning_at IS NOT NULL THEN 'compatibility lost; no active workers advertising bundle'
+				     WHEN (SELECT count(DISTINCT w.id) FROM worker_sessions ws JOIN workers w ON w.id=ws.worker_id AND w.organization_id=ws.organization_id JOIN worker_deployments wd ON wd.session_id=ws.id AND wd.organization_id=ws.organization_id WHERE ws.organization_id=c.organization_id AND ws.environment_id=c.environment_id AND ws.revoked_at IS NULL AND ws.expires_at>clock_timestamp() AND w.status='ACTIVE' AND wd.bundle_digest=d.bundle_digest) = 1 THEN 'single compatible worker; no failover'
+				     ELSE '' END as warning
+				FROM workflow_channels c
+				LEFT JOIN deployments d ON d.id=c.active_deployment_id AND d.organization_id=c.organization_id
+				WHERE c.organization_id=$1::uuid AND c.environment_id=$2::uuid AND c.workflow_name > $3
+				ORDER BY c.workflow_name ASC
+				LIMIT $4`, orgID, envID, cursor, limit+1)
+		} else {
+			rows, err = tx.Query(ctx, `SELECT c.workflow_name, c.active_deployment_id::text, c.revision,
+				CASE WHEN d.compatibility_warning_at IS NOT NULL THEN 'compatibility lost; no active workers advertising bundle'
+				     WHEN (SELECT count(DISTINCT w.id) FROM worker_sessions ws JOIN workers w ON w.id=ws.worker_id AND w.organization_id=ws.organization_id JOIN worker_deployments wd ON wd.session_id=ws.id AND wd.organization_id=ws.organization_id WHERE ws.organization_id=c.organization_id AND ws.environment_id=c.environment_id AND ws.revoked_at IS NULL AND ws.expires_at>clock_timestamp() AND w.status='ACTIVE' AND wd.bundle_digest=d.bundle_digest) = 1 THEN 'single compatible worker; no failover'
+				     ELSE '' END as warning
+				FROM workflow_channels c
+				LEFT JOIN deployments d ON d.id=c.active_deployment_id AND d.organization_id=c.organization_id
+				WHERE c.organization_id=$1::uuid AND c.environment_id=$2::uuid
+				ORDER BY c.workflow_name ASC
+				LIMIT $3`, orgID, envID, limit+1)
+		}
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var wf Workflow
+			var activeDep *string
+			var warning string
+			if err := rows.Scan(&wf.Name, &activeDep, &wf.Revision, &warning); err != nil {
+				return err
+			}
+			wf.ActiveDeploymentID = activeDep
+			wf.Warning = warning
+			items = append(items, wf)
+		}
+		if err := rows.Err(); err != nil {
+			return err
+		}
+
+		if len(items) > limit {
+			last := items[limit-1]
+			nextCursor = &last.Name
+			items = items[:limit]
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	if items == nil {
+		items = []Workflow{}
+	}
+	return items, nextCursor, nil
 }

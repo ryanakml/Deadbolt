@@ -28,6 +28,7 @@ export type StepTab = "summary" | "attempts" | "events" | "logs" | "input" | "ou
 export type InspectorViewMode = "graph" | "list";
 export interface Run {
     id: string;
+    input?: unknown;
     organizationId?: string;
     projectId?: string;
     environmentId?: string;

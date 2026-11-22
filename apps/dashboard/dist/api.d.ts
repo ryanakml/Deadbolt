@@ -77,6 +77,22 @@ export declare class DashboardApiClient {
     cancelRun(runId: string, expectedRevision: number, idempotencyKey?: string): Promise<Run>;
     pauseRun(runId: string, expectedRevision: number, idempotencyKey?: string): Promise<Run>;
     resumeRun(runId: string, expectedRevision: number, idempotencyKey?: string): Promise<Run>;
+    rerunRun(runId: string, options: {
+        deploymentId?: string;
+        input?: unknown;
+    }, idempotencyKey?: string): Promise<Run>;
+    drainWorker(workerId: string, idempotencyKey?: string): Promise<void>;
+    revokeWorker(workerId: string, idempotencyKey?: string): Promise<void>;
+    listDeployments(environmentId: string, limit?: number, cursor?: string): Promise<{
+        items: any[];
+        nextCursor: string | null;
+    }>;
+    deleteDeployment(environmentId: string, deploymentId: string, idempotencyKey?: string): Promise<void>;
+    listWorkflows(environmentId: string, limit?: number, cursor?: string): Promise<{
+        items: any[];
+        nextCursor: string | null;
+    }>;
+    activateWorkflow(environmentId: string, workflowName: string, deploymentId: string, expectedRevision: number, allowSingleWorker?: boolean, idempotencyKey?: string): Promise<any>;
     listSchedules(environmentId: string): Promise<Schedule[]>;
     createSchedule(environmentId: string, body: {
         workflow: string;

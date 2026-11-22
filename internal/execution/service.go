@@ -205,6 +205,61 @@ func (s *Service) CreateRun(
 	return resultRun, isReplay, nil
 }
 
+// Rerun creates a new run from an existing run, executing the workflow from the
+// beginning with new operation IDs (Blueprint §20.2 / INV-09).
+// It defaults to using the original run's deployment and input unless explicit
+// overrides are provided. Terminal history is never reopened or mutated.
+func (s *Service) Rerun(
+	ctx context.Context,
+	orgID, runID, idempotencyKey string,
+	explicitDeploymentID *string,
+	explicitInput any,
+	audit *tenant.AuditContext,
+) (*RunDTO, bool, error) {
+	if audit == nil {
+		return nil, false, tenant.ErrAuditRequired
+	}
+	if idempotencyKey == "" {
+		return nil, false, ErrMissingIdempotencyKey
+	}
+
+	var origWorkflowName, origEnvID, origDeploymentID string
+	var origInputRaw []byte
+	err := s.pool.WithTenantReadOnlyRepeatableReadTx(ctx, orgID, func(ctx context.Context, tx storage.Tx) error {
+		return tx.QueryRow(ctx, `SELECT workflow_name, environment_id::text, deployment_id::text, input
+			FROM runs WHERE id = $1::uuid AND organization_id = $2::uuid`, runID, orgID).
+			Scan(&origWorkflowName, &origEnvID, &origDeploymentID, &origInputRaw)
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, false, ErrRunNotFound
+		}
+		return nil, false, fmt.Errorf("lookup original run for rerun: %w", err)
+	}
+
+	depToUse := &origDeploymentID
+	if explicitDeploymentID != nil && *explicitDeploymentID != "" {
+		depToUse = explicitDeploymentID
+	}
+
+	var inputToUse any
+	if explicitInput != nil {
+		inputToUse = explicitInput
+	} else {
+		if len(origInputRaw) > 0 {
+			var unmarshaled any
+			if err := json.Unmarshal(origInputRaw, &unmarshaled); err == nil {
+				inputToUse = unmarshaled
+			}
+		}
+	}
+	if inputToUse == nil {
+		inputToUse = map[string]any{}
+	}
+
+	return s.CreateRun(ctx, orgID, origEnvID, origWorkflowName, idempotencyKey, depToUse, inputToUse, audit)
+}
+
 func (s *Service) GetRun(ctx context.Context, orgID, runID string) (*RunSnapshotDTO, error) {
 	var snapshot *RunSnapshotDTO
 	err := s.pool.WithTenantReadOnlyRepeatableReadTx(ctx, orgID, func(ctx context.Context, tx storage.Tx) error {
