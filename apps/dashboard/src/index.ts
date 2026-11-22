@@ -614,33 +614,53 @@ function initDashboard(): void {
           <td>${actionsHtml}</td>
         `;
 
-        row.querySelector(".drain-worker-btn")?.addEventListener("click", async (e) => {
-          const btn = e.currentTarget as HTMLButtonElement;
-          const wId = btn.getAttribute("data-worker-id");
-          if (!wId || !confirm(`Drain worker ${wId}? The worker will finish active attempts and claim no new work.`)) return;
-          btn.disabled = true;
-          try {
-            await client.drainWorker(wId);
-            await loadWorkersList(client, envId);
-          } catch (err: unknown) {
-            alert(`Failed to drain worker: ${err instanceof Error ? err.message : String(err)}`);
-            btn.disabled = false;
-          }
-        });
+        row
+          .querySelector(".drain-worker-btn")
+          ?.addEventListener("click", async (e) => {
+            const btn = e.currentTarget as HTMLButtonElement;
+            const wId = btn.getAttribute("data-worker-id");
+            if (
+              !wId ||
+              !confirm(
+                `Drain worker ${wId}? The worker will finish active attempts and claim no new work.`,
+              )
+            )
+              return;
+            btn.disabled = true;
+            try {
+              await client.drainWorker(wId);
+              await loadWorkersList(client, envId);
+            } catch (err: unknown) {
+              alert(
+                `Failed to drain worker: ${err instanceof Error ? err.message : String(err)}`,
+              );
+              btn.disabled = false;
+            }
+          });
 
-        row.querySelector(".revoke-worker-btn")?.addEventListener("click", async (e) => {
-          const btn = e.currentTarget as HTMLButtonElement;
-          const wId = btn.getAttribute("data-worker-id");
-          if (!wId || !confirm(`Revoke worker ${wId}? This will immediately terminate its active sessions and leases.`)) return;
-          btn.disabled = true;
-          try {
-            await client.revokeWorker(wId);
-            await loadWorkersList(client, envId);
-          } catch (err: unknown) {
-            alert(`Failed to revoke worker: ${err instanceof Error ? err.message : String(err)}`);
-            btn.disabled = false;
-          }
-        });
+        row
+          .querySelector(".revoke-worker-btn")
+          ?.addEventListener("click", async (e) => {
+            const btn = e.currentTarget as HTMLButtonElement;
+            const wId = btn.getAttribute("data-worker-id");
+            if (
+              !wId ||
+              !confirm(
+                `Revoke worker ${wId}? This will immediately terminate its active sessions and leases.`,
+              )
+            )
+              return;
+            btn.disabled = true;
+            try {
+              await client.revokeWorker(wId);
+              await loadWorkersList(client, envId);
+            } catch (err: unknown) {
+              alert(
+                `Failed to revoke worker: ${err instanceof Error ? err.message : String(err)}`,
+              );
+              btn.disabled = false;
+            }
+          });
 
         listContainer.appendChild(row);
       }
@@ -695,7 +715,8 @@ function initDashboard(): void {
 
         let warningHtml = '<span class="text-muted">None</span>';
         if (dep.compatibilityWarningAt) {
-          warningHtml = '<span class="badge status-failed" title="No live workers advertising this bundle">COMPATIBILITY LOST</span>';
+          warningHtml =
+            '<span class="badge status-failed" title="No live workers advertising this bundle">COMPATIBILITY LOST</span>';
         }
 
         let actionHtml = '<span class="text-muted">-</span>';
@@ -712,19 +733,24 @@ function initDashboard(): void {
           <td>${actionHtml}</td>
         `;
 
-        row.querySelector(".delete-dep-btn")?.addEventListener("click", async (e) => {
-          const btn = e.currentTarget as HTMLButtonElement;
-          const dId = btn.getAttribute("data-dep-id");
-          if (!dId || !confirm(`Delete unreferenced deployment ${dId}?`)) return;
-          btn.disabled = true;
-          try {
-            await client.deleteDeployment(envId, dId);
-            await loadDeploymentsList(client, envId);
-          } catch (err: unknown) {
-            alert(`Failed to delete deployment: ${err instanceof Error ? err.message : String(err)}`);
-            btn.disabled = false;
-          }
-        });
+        row
+          .querySelector(".delete-dep-btn")
+          ?.addEventListener("click", async (e) => {
+            const btn = e.currentTarget as HTMLButtonElement;
+            const dId = btn.getAttribute("data-dep-id");
+            if (!dId || !confirm(`Delete unreferenced deployment ${dId}?`))
+              return;
+            btn.disabled = true;
+            try {
+              await client.deleteDeployment(envId, dId);
+              await loadDeploymentsList(client, envId);
+            } catch (err: unknown) {
+              alert(
+                `Failed to delete deployment: ${err instanceof Error ? err.message : String(err)}`,
+              );
+              btn.disabled = false;
+            }
+          });
 
         listContainer.appendChild(row);
       }
@@ -3212,9 +3238,15 @@ function initDashboard(): void {
 
     const idempotencyKey = newIdempotencyKey();
     const errorBox = overlay.querySelector("#rerun-error") as HTMLElement;
-    const confirmBtn = overlay.querySelector("#rerun-confirm") as HTMLButtonElement;
-    const depInput = overlay.querySelector("#rerun-deployment-id") as HTMLInputElement;
-    const inputArea = overlay.querySelector("#rerun-input-editor") as HTMLTextAreaElement;
+    const confirmBtn = overlay.querySelector(
+      "#rerun-confirm",
+    ) as HTMLButtonElement;
+    const depInput = overlay.querySelector(
+      "#rerun-deployment-id",
+    ) as HTMLInputElement;
+    const inputArea = overlay.querySelector(
+      "#rerun-input-editor",
+    ) as HTMLTextAreaElement;
 
     const close = (): void => {
       overlay.remove();
@@ -3241,7 +3273,11 @@ function initDashboard(): void {
       confirmBtn.textContent = "Submitting rerun...";
       try {
         const depIdVal = depInput.value.trim() || snap.deploymentId;
-        const newRun = await api.rerunRun(snap.id, { deploymentId: depIdVal, input: parsedInput }, idempotencyKey);
+        const newRun = await api.rerunRun(
+          snap.id,
+          { deploymentId: depIdVal, input: parsedInput },
+          idempotencyKey,
+        );
         close();
         inspectRun(newRun.id);
       } catch (err: unknown) {

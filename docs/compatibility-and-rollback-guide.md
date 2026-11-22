@@ -6,25 +6,29 @@ This guide details the operational and architectural contracts for SDK/Agent com
 
 ## 1. Architectural Principles & Invariants
 
-| Invariant | Principle | Enforcement Mechanism |
-| :--- | :--- | :--- |
-| **INV-02** | **Run Immutability & Deployment Pinning** | Every run is permanently pinned to the exact deployment (`deployment_id` and SHA-256 `bundle_digest`) active when created. Pointer movement or rollbacks never alter running or historical runs. |
-| **INV-09** | **Terminal History Preservation** | Terminal runs (`SUCCEEDED`, `FAILED`, `CANCELLED`, `TIMED_OUT`) cannot be modified or re-opened. Reruns mint brand-new runs starting at `QUEUED` / `revision: 1` with fresh step and attempt IDs. |
-| **ADR-10** | **Explicit Channel Revisions** | Workflow channels use compare-and-swap (`expectedRevision`) for all pointer updates. Rollback is an explicit forward revision that re-points the active deployment. |
-| **§20** | **Referential Integrity on Deletion** | Deployments referenced by active workflow channels or existing runs cannot be deleted (`409 Conflict: DEPLOYMENT_REFERENCED`). |
+| Invariant  | Principle                                 | Enforcement Mechanism                                                                                                                                                                             |
+| :--------- | :---------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **INV-02** | **Run Immutability & Deployment Pinning** | Every run is permanently pinned to the exact deployment (`deployment_id` and SHA-256 `bundle_digest`) active when created. Pointer movement or rollbacks never alter running or historical runs.  |
+| **INV-09** | **Terminal History Preservation**         | Terminal runs (`SUCCEEDED`, `FAILED`, `CANCELLED`, `TIMED_OUT`) cannot be modified or re-opened. Reruns mint brand-new runs starting at `QUEUED` / `revision: 1` with fresh step and attempt IDs. |
+| **ADR-10** | **Explicit Channel Revisions**            | Workflow channels use compare-and-swap (`expectedRevision`) for all pointer updates. Rollback is an explicit forward revision that re-points the active deployment.                               |
+| **§20**    | **Referential Integrity on Deletion**     | Deployments referenced by active workflow channels or existing runs cannot be deleted (`409 Conflict: DEPLOYMENT_REFERENCED`).                                                                    |
 
 ---
 
 ## 2. SDK & Agent Version Compatibility
 
 ### Consecutive Minor Version Compatibility
+
 Control Plane, Worker Agents, and TypeScript SDK maintain strict semantic versioning within the same major version:
+
 - **Consecutive Minor Versions:** Any worker agent running version `X.Y` can execute workflows compiled by SDK `X.(Y-1)` or `X.(Y+1)` provided the `protocolMajor` and `manifestVersion` match.
 - **Protocol Major Match:** `protocolMajor` (currently `1`) and `manifestVersion` (currently `1`) must match exactly.
 - **Node Runtime Baseline:** Node runtime major is validated against the supported host runtime (Node 24).
 
 ### Actionable Rejection of Unsupported Majors
+
 Submitting a manifest or connecting an agent with an unsupported major version fails immediately and actionably:
+
 - Manifest submission with `manifestVersion != 1` returns **HTTP 422 Unprocessable Content**:
   ```json
   {
@@ -47,10 +51,13 @@ Submitting a manifest or connecting an agent with an unsupported major version f
 ## 3. Retained Bundle Obligations & Worker Inventory
 
 ### Retained Bundles for Historical Runs
+
 Because existing runs remain pinned to their original `deployment_id` (INV-02), the orchestrator requires workers that can execute those specific bundles until all in-flight runs reach a terminal state.
 
 ### Worker Availability & Loss Warning
+
 Workers advertise their deployed bundles during registration and periodic polling:
+
 1. When a worker is drained (`POST /v1/workers/{id}/drain`) or revoked (`POST /v1/workers/{id}/revoke`), Deadbolt automatically runs `ReconcileAvailabilityTx`.
 2. If an active workflow channel's deployment has **zero active, non-draining workers** advertising its bundle digest:
    - The deployment's `compatibility_warning_at` timestamp is set.
@@ -58,7 +65,9 @@ Workers advertise their deployed bundles during registration and periodic pollin
    - Control Plane alarms and dashboard indicators notify operators that newly admitted runs cannot be claimed until compatible workers reconnect.
 
 ### Referenced Registration Deletion Protection
+
 To prevent broken audit trails and orphaned runs:
+
 - `DELETE /v1/deployments/{id}` queries `runs` and `workflow_channels`.
 - If any run references the deployment, or if the deployment is currently active on any workflow channel, deletion is rejected with **HTTP 409 Conflict (`DEPLOYMENT_REFERENCED`)**.
 - Only deployments with **0 run references** and **no active channel pointers** can be purged.
@@ -68,6 +77,7 @@ To prevent broken audit trails and orphaned runs:
 ## 4. Deployment Rollback & Channel Pointer Movements
 
 Workflow execution is decoupled from authoring via **Workflow Channels**:
+
 - Each environment (`staging`, `production`) maintains channel pointers (`workflow_channels`) mapping `workflow_name` to `active_deployment_id` with a monotonic integer `revision`.
 - Advancing a channel requires atomic CAS (`expectedRevision`):
   ```bash
@@ -83,6 +93,7 @@ Workflow execution is decoupled from authoring via **Workflow Channels**:
   ```
 
 ### Rollback Semantics
+
 - Rolling back from Deployment B (rev 2) to Deployment A (prior deployment) does NOT decrement the channel revision.
 - It performs a new forward CAS operation (rev 2 $\to$ rev 3), setting `active_deployment_id = Deployment A`.
 - **Immediate Outcome:**
@@ -95,12 +106,16 @@ Workflow execution is decoupled from authoring via **Workflow Channels**:
 ## 5. Rerun Semantics & Side-Effect Warnings
 
 ### Invariant INV-09 Compliance
+
 Under no circumstances does a rerun reopen, mutate, or overwrite a finished run record:
+
 - The completed run remains permanently in the database with its original status, timing, step outputs, and audit trail.
 - Initiating a rerun invokes `POST /v1/runs/{id}/rerun`.
 
 ### Rerun Execution Behavior
+
 When `POST /v1/runs/{id}/rerun` is invoked:
+
 1. **Fresh Identifiers:** A new run is created with a brand-new `id` (UUIDv7), `status = QUEUED`, `revision = 1`, and fresh `run_steps` with new attempt IDs.
 2. **Default Deployment Binding:** By default, the rerun uses the **original run's deployment**, preserving the exact code version that executed previously.
 3. **Explicit Deployment Override:** An operator may optionally pass `"explicitDeploymentId": "..."` to migrate the rerun to a newer (or rolled back) deployment.
@@ -108,6 +123,7 @@ When `POST /v1/runs/{id}/rerun` is invoked:
 5. **Audit Logging:** An audit entry is recorded linking the new run ID with `rerun_from_run_id` in the metadata.
 
 ### Side-Effect Warning & Gating
+
 Re-executing a workflow carries inherent side-effect risks (e.g. charge operations, external emails, third-party webhooks) if intermediate tasks are not idempotent.
 
 - **API Acknowledgement:** When changing inputs or deployment versions, requests are logged with side-effect advisories.
@@ -122,23 +138,31 @@ Re-executing a workflow carries inherent side-effect risks (e.g. charge operatio
 ## 6. Control Plane API Reference
 
 ### `GET /v1/deployments`
+
 Lists immutable deployment registrations with pagination and worker compatibility status.
+
 - **Query Params:** `environment` (optional filter), `limit` (default 25), `cursor`.
 - **Capabilities Required:** `deployments:register` or `runs:read`.
 
 ### `DELETE /v1/deployments/{id}`
+
 Deletes an unreferenced deployment registration.
+
 - **Headers:** `X-Organization-ID`.
 - **Response:** `204 No Content` on success; `409 Conflict` (`DEPLOYMENT_REFERENCED`) if active or referenced by runs.
 - **Capabilities Required:** `deployments:register` or `deployments:write`.
 
 ### `GET /v1/workflows`
+
 Lists workflows with active channel pointers, current revisions, and deployment bundle summaries.
+
 - **Query Params:** `environment` (required UUID or name), `limit`, `cursor`.
 - **Capabilities Required:** `workflows:read` or `runs:read`.
 
 ### `POST /v1/runs/{id}/rerun`
+
 Dispatches a new run starting from the beginning.
+
 - **Headers:** `X-Organization-ID`, `Idempotency-Key`.
 - **Body:**
   ```json
@@ -155,6 +179,7 @@ Dispatches a new run starting from the beginning.
 ## 7. Dashboard UI Workflows
 
 The Deadbolt Web Dashboard (`apps/dashboard/`) includes dedicated operator controls:
+
 1. **Deployments View (`#deployments-view`):**
    - Displays all registered bundles, SDK versions, node runtimes, creation timestamps, and active channel statuses.
    - Allows safe deletion of unreferenced deployments with confirmation dialogs.

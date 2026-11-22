@@ -140,6 +140,6 @@ export function sessionCanDrainWorkers(session, orgId) {
 export function visibleRerunControl(status, canControl) {
     if (!canControl)
         return false;
-    return status === "SUCCEEDED" || status === "FAILED" || status === "CANCELLED";
+    return (status === "SUCCEEDED" || status === "FAILED" || status === "CANCELLED");
 }
 //# sourceMappingURL=permissions.js.map

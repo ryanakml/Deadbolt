@@ -496,10 +496,13 @@ function initDashboard() {
           <td>${digests}</td>
           <td>${actionsHtml}</td>
         `;
-                row.querySelector(".drain-worker-btn")?.addEventListener("click", async (e) => {
+                row
+                    .querySelector(".drain-worker-btn")
+                    ?.addEventListener("click", async (e) => {
                     const btn = e.currentTarget;
                     const wId = btn.getAttribute("data-worker-id");
-                    if (!wId || !confirm(`Drain worker ${wId}? The worker will finish active attempts and claim no new work.`))
+                    if (!wId ||
+                        !confirm(`Drain worker ${wId}? The worker will finish active attempts and claim no new work.`))
                         return;
                     btn.disabled = true;
                     try {
@@ -511,10 +514,13 @@ function initDashboard() {
                         btn.disabled = false;
                     }
                 });
-                row.querySelector(".revoke-worker-btn")?.addEventListener("click", async (e) => {
+                row
+                    .querySelector(".revoke-worker-btn")
+                    ?.addEventListener("click", async (e) => {
                     const btn = e.currentTarget;
                     const wId = btn.getAttribute("data-worker-id");
-                    if (!wId || !confirm(`Revoke worker ${wId}? This will immediately terminate its active sessions and leases.`))
+                    if (!wId ||
+                        !confirm(`Revoke worker ${wId}? This will immediately terminate its active sessions and leases.`))
                         return;
                     btn.disabled = true;
                     try {
@@ -572,7 +578,8 @@ function initDashboard() {
                     : `<span class="badge status-${dep.status.toLowerCase()}">${dep.status}</span>`;
                 let warningHtml = '<span class="text-muted">None</span>';
                 if (dep.compatibilityWarningAt) {
-                    warningHtml = '<span class="badge status-failed" title="No live workers advertising this bundle">COMPATIBILITY LOST</span>';
+                    warningHtml =
+                        '<span class="badge status-failed" title="No live workers advertising this bundle">COMPATIBILITY LOST</span>';
                 }
                 let actionHtml = '<span class="text-muted">-</span>';
                 if (!isActive) {
@@ -586,7 +593,9 @@ function initDashboard() {
           <td>${new Date(dep.createdAt).toLocaleString()}</td>
           <td>${actionHtml}</td>
         `;
-                row.querySelector(".delete-dep-btn")?.addEventListener("click", async (e) => {
+                row
+                    .querySelector(".delete-dep-btn")
+                    ?.addEventListener("click", async (e) => {
                     const btn = e.currentTarget;
                     const dId = btn.getAttribute("data-dep-id");
                     if (!dId || !confirm(`Delete unreferenced deployment ${dId}?`))

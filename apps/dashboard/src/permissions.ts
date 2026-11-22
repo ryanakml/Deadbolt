@@ -170,5 +170,7 @@ export function visibleRerunControl(
   canControl: boolean,
 ): boolean {
   if (!canControl) return false;
-  return status === "SUCCEEDED" || status === "FAILED" || status === "CANCELLED";
+  return (
+    status === "SUCCEEDED" || status === "FAILED" || status === "CANCELLED"
+  );
 }
