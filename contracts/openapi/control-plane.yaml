@@ -521,6 +521,109 @@ paths:
           description:
             Select a verified member environment for browser sessions. Must
             match authoritative environment scope for an API key.
+    get:
+      summary: List registered deployments
+      operationId: listDeployments
+      parameters:
+        - name: environment
+          in: query
+          required: true
+          schema: *a1
+        - name: cursor
+          in: query
+          schema: *a1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 25
+      x-required-capability: deployments:register
+      x-implemented: true
+      responses:
+        "200":
+          description: Committed response
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Deployment"
+                  nextCursor:
+                    type:
+                      - string
+                      - "null"
+                required:
+                  - items
+                  - nextCursor
+                additionalProperties: false
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ErrorResponse"
+      security: &a4
+        - EnvironmentKey: []
+        - BrowserSession: []
+  /deployments/{id}:
+    delete:
+      summary: Delete an unreferenced deployment registration
+      operationId: deleteDeployment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: *a1
+        - name: environment
+          in: query
+          required: true
+          schema: *a1
+        - *a2
+        - name: X-CSRF-Token
+          in: header
+          schema: *a1
+          description: Required for browser-session mutations with validated Origin.
+      x-required-capability: deployments:register
+      x-implemented: true
+      responses:
+        "204":
+          description: Deployment deleted
+        "400":
+          $ref: "#/components/responses/ErrorResponse"
+        "401":
+          $ref: "#/components/responses/ErrorResponse"
+        "403":
+          $ref: "#/components/responses/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/ErrorResponse"
+        "409":
+          $ref: "#/components/responses/ErrorResponse"
+        "413":
+          $ref: "#/components/responses/ErrorResponse"
+        "422":
+          $ref: "#/components/responses/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/ErrorResponse"
+        "503":
+          $ref: "#/components/responses/ErrorResponse"
+      security: *a4
   /workflows/{name}/activate:
     post:
       summary: Set active deployment version for new runs
@@ -674,7 +777,7 @@ paths:
           schema: *a1
           description: Required for browser-session mutations with validated Origin.
       x-required-capability: runs:create
-      x-implemented: false
+      x-implemented: true
       responses:
         "202":
           description: Committed response
@@ -700,9 +803,7 @@ paths:
           $ref: "#/components/responses/ErrorResponse"
         "503":
           $ref: "#/components/responses/ErrorResponse"
-      security: &a4
-        - EnvironmentKey: []
-        - BrowserSession: []
+      security: *a4
       requestBody:
         required: true
         content:
@@ -736,7 +837,7 @@ paths:
             maximum: 100
             default: 25
       x-required-capability: workflows:read
-      x-implemented: false
+      x-implemented: true
       responses:
         "200":
           description: Committed response

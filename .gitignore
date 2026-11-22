@@ -48,4 +48,6 @@ minio-data/
 postgres-data/
 
 # Repository specific
+portfolio-assets-deadbolt/
+
 /non_pushable_docs

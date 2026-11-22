@@ -19,6 +19,7 @@ const (
 
 type DeploymentReconciler interface {
 	ReconcileAvailability(ctx context.Context, orgID, envID string) error
+	ReconcileAvailabilityTx(ctx context.Context, tx storage.Tx, orgID, envID string) error
 }
 
 type EnrollmentTokenInfo struct {
@@ -698,7 +699,16 @@ func (s *Service) RevokeWorker(ctx context.Context, orgID, workerID string) erro
 			}
 		}
 
-		_, err := tx.Exec(ctx, `UPDATE workers SET status = 'REVOKED' WHERE id = $1::uuid AND organization_id = $2::uuid`, workerID, orgID)
+		var envID string
+		err := tx.QueryRow(ctx, `SELECT environment_id::text FROM workers WHERE id = $1::uuid AND organization_id = $2::uuid`, workerID, orgID).Scan(&envID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errors.New("worker not found")
+			}
+			return err
+		}
+
+		_, err = tx.Exec(ctx, `UPDATE workers SET status = 'REVOKED' WHERE id = $1::uuid AND organization_id = $2::uuid`, workerID, orgID)
 		if err != nil {
 			return err
 		}
@@ -707,6 +717,12 @@ func (s *Service) RevokeWorker(ctx context.Context, orgID, workerID string) erro
 		if err != nil {
 			return err
 		}
+
+		if s.deployments != nil {
+			if err := s.deployments.ReconcileAvailabilityTx(ctx, tx, orgID, envID); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 }
@@ -714,7 +730,25 @@ func (s *Service) RevokeWorker(ctx context.Context, orgID, workerID string) erro
 // DrainWorker marks a worker DRAINING so it finishes active attempts but claims no new work.
 func (s *Service) DrainWorker(ctx context.Context, orgID, workerID string) error {
 	return s.pool.WithTenantTx(ctx, orgID, func(ctx context.Context, tx storage.Tx) error {
-		_, err := tx.Exec(ctx, `UPDATE workers SET status = 'DRAINING' WHERE id = $1::uuid AND organization_id = $2::uuid`, workerID, orgID)
-		return err
+		var envID string
+		err := tx.QueryRow(ctx, `SELECT environment_id::text FROM workers WHERE id = $1::uuid AND organization_id = $2::uuid`, workerID, orgID).Scan(&envID)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return errors.New("worker not found")
+			}
+			return err
+		}
+
+		_, err = tx.Exec(ctx, `UPDATE workers SET status = 'DRAINING' WHERE id = $1::uuid AND organization_id = $2::uuid`, workerID, orgID)
+		if err != nil {
+			return err
+		}
+
+		if s.deployments != nil {
+			if err := s.deployments.ReconcileAvailabilityTx(ctx, tx, orgID, envID); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }

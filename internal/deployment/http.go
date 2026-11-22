@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 )
 
 type HTTPHandler struct {
@@ -137,6 +138,9 @@ func writeServiceErr(w http.ResponseWriter, r *http.Request, e error) {
 	if errors.Is(e, ErrPreflight) {
 		code, status = "WORKER_PREFLIGHT_FAILED", 409
 	}
+	if errors.Is(e, ErrReferenced) {
+		code, status = "DEPLOYMENT_REFERENCED", 409
+	}
 	if errors.Is(e, ErrNotFound) {
 		code, status = "NOT_FOUND", 404
 	}
@@ -171,4 +175,147 @@ func writeJSON(w http.ResponseWriter, s int, v any) {
 }
 func errJSON(w http.ResponseWriter, r *http.Request, s int, c, m string) {
 	writeJSON(w, s, map[string]any{"code": c, "message": m, "requestId": tenant.RequestIDFromContext(r.Context()), "details": map[string]any{}, "retryable": s >= 500})
+}
+
+func (h *HTTPHandler) List(w http.ResponseWriter, r *http.Request) {
+	caller, ok := tenant.CallerFromContext(r.Context())
+	if !ok {
+		errJSON(w, r, 401, "UNAUTHENTICATED", "Authentication required")
+		return
+	}
+	envParam := r.URL.Query().Get("environment")
+	if envParam == "" {
+		errJSON(w, r, 400, "MISSING_ENVIRONMENT", "Environment is required")
+		return
+	}
+	env := envParam
+	if caller.Type == tenant.IdentityTypeMachine && (env == caller.EnvironmentName || env == caller.EnvironmentID) {
+		env = caller.EnvironmentID
+	} else if caller.Type != tenant.IdentityTypeMachine {
+		environment, err := h.tenants.ResolveEnvironment(r.Context(), caller.OrganizationID, envParam)
+		if err != nil {
+			if errors.Is(err, tenant.ErrEnvironmentAmbiguous) {
+				errJSON(w, r, 400, "AMBIGUOUS_ENVIRONMENT", "Environment name matches multiple environments; use the environment UUID")
+				return
+			}
+			errJSON(w, r, 404, "NOT_FOUND", "Environment not found")
+			return
+		}
+		env = environment.ID
+	}
+	if !h.allowed(r, caller, env, tenant.CapDeploymentsRegister) && !h.allowed(r, caller, env, tenant.CapRunsRead) {
+		errJSON(w, r, 403, "FORBIDDEN", "Listing deployments is not permitted")
+		return
+	}
+
+	limit := 25
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	cursor := r.URL.Query().Get("cursor")
+
+	items, nextCursor, err := h.service.ListDeployments(r.Context(), caller.OrganizationID, env, limit, cursor)
+	if err != nil {
+		writeServiceErr(w, r, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"items":      items,
+		"nextCursor": nextCursor,
+	})
+}
+
+func (h *HTTPHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	caller, ok := tenant.CallerFromContext(r.Context())
+	if !ok {
+		errJSON(w, r, 401, "UNAUTHENTICATED", "Authentication required")
+		return
+	}
+	envParam := r.URL.Query().Get("environment")
+	if envParam == "" {
+		errJSON(w, r, 400, "MISSING_ENVIRONMENT", "Environment is required")
+		return
+	}
+	env := envParam
+	if caller.Type == tenant.IdentityTypeMachine && (env == caller.EnvironmentName || env == caller.EnvironmentID) {
+		env = caller.EnvironmentID
+	} else if caller.Type != tenant.IdentityTypeMachine {
+		environment, err := h.tenants.ResolveEnvironment(r.Context(), caller.OrganizationID, envParam)
+		if err != nil {
+			if errors.Is(err, tenant.ErrEnvironmentAmbiguous) {
+				errJSON(w, r, 400, "AMBIGUOUS_ENVIRONMENT", "Environment name matches multiple environments; use the environment UUID")
+				return
+			}
+			errJSON(w, r, 404, "NOT_FOUND", "Environment not found")
+			return
+		}
+		env = environment.ID
+	}
+	if !h.allowed(r, caller, env, tenant.CapDeploymentsRegister) {
+		errJSON(w, r, 403, "FORBIDDEN", "Deleting deployment is not permitted")
+		return
+	}
+	deploymentID := r.PathValue("id")
+	if deploymentID == "" {
+		errJSON(w, r, 400, "INVALID_REQUEST", "deployment id is required")
+		return
+	}
+	err := h.service.DeleteDeployment(r.Context(), caller.OrganizationID, env, deploymentID, auditFromCaller(caller, r))
+	if err != nil {
+		writeServiceErr(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *HTTPHandler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
+	caller, ok := tenant.CallerFromContext(r.Context())
+	if !ok {
+		errJSON(w, r, 401, "UNAUTHENTICATED", "Authentication required")
+		return
+	}
+	envParam := r.URL.Query().Get("environment")
+	if envParam == "" {
+		errJSON(w, r, 400, "MISSING_ENVIRONMENT", "Environment is required")
+		return
+	}
+	env := envParam
+	if caller.Type == tenant.IdentityTypeMachine && (env == caller.EnvironmentName || env == caller.EnvironmentID) {
+		env = caller.EnvironmentID
+	} else if caller.Type != tenant.IdentityTypeMachine {
+		environment, err := h.tenants.ResolveEnvironment(r.Context(), caller.OrganizationID, envParam)
+		if err != nil {
+			if errors.Is(err, tenant.ErrEnvironmentAmbiguous) {
+				errJSON(w, r, 400, "AMBIGUOUS_ENVIRONMENT", "Environment name matches multiple environments; use the environment UUID")
+				return
+			}
+			errJSON(w, r, 404, "NOT_FOUND", "Environment not found")
+			return
+		}
+		env = environment.ID
+	}
+	if !h.allowed(r, caller, env, tenant.CapWorkflowsRead) {
+		errJSON(w, r, 403, "FORBIDDEN", "Listing workflows is not permitted")
+		return
+	}
+
+	limit := 25
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 {
+			limit = parsed
+		}
+	}
+	cursor := r.URL.Query().Get("cursor")
+
+	items, nextCursor, err := h.service.ListWorkflows(r.Context(), caller.OrganizationID, env, limit, cursor)
+	if err != nil {
+		writeServiceErr(w, r, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{
+		"items":      items,
+		"nextCursor": nextCursor,
+	})
 }

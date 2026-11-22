@@ -135,3 +135,40 @@ export function visibleRunControls(
       return { pause: false, resume: false, cancel: false };
   }
 }
+
+export const WORKERS_DRAIN_CAPABILITY = "workers:drain";
+
+const WORKERS_DRAIN_ROLES = new Set(["operator", "admin", "owner"]);
+
+// roleCanDrainWorkers reports whether a canonical role grants workers:drain.
+export function roleCanDrainWorkers(role: string | null | undefined): boolean {
+  if (!role) return false;
+  return WORKERS_DRAIN_ROLES.has(role.trim().toLowerCase());
+}
+
+// sessionCanDrainWorkers mirrors roleCanDrainWorkers against the BFF session.
+export function sessionCanDrainWorkers(
+  session: AuthSession | null | undefined,
+  orgId: string | null | undefined,
+): boolean {
+  if (!session || !orgId) return false;
+  const memberships = session.memberships ?? [];
+  for (const m of memberships) {
+    if (!m || m.OrganizationID !== orgId) continue;
+    if (String(m.Status ?? "").toUpperCase() !== "ACTIVE") continue;
+    return roleCanDrainWorkers(m.Role);
+  }
+  return false;
+}
+
+// visibleRerunControl determines whether the Rerun CTA should render.
+// Blueprint §20.2 / INV-09: Rerun creates a new run from the beginning with
+// new operation IDs. It renders for terminal runs (SUCCEEDED, FAILED, CANCELLED)
+// when the caller holds runs:control or runs:create.
+export function visibleRerunControl(
+  status: RunStatus,
+  canControl: boolean,
+): boolean {
+  if (!canControl) return false;
+  return status === "SUCCEEDED" || status === "FAILED" || status === "CANCELLED";
+}

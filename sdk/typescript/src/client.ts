@@ -375,6 +375,38 @@ export class DeadboltClient {
       );
       return res.data;
     },
+
+    /**
+     * Reruns an existing workflow execution from the beginning as a new run
+     * with fresh operation IDs. Preserves original deployment and input by default.
+     */
+    rerun: async (options: {
+      runId: string;
+      idempotencyKey?: string;
+      deploymentId?: string;
+      input?: unknown;
+    }): Promise<Run> => {
+      if (!options.runId || typeof options.runId !== "string") {
+        fail("INVALID_RUN_ID");
+      }
+      const headers: Record<string, string> = {
+        "Idempotency-Key": options.idempotencyKey || `rerun-${options.runId}-${Date.now()}`,
+      };
+      const body: Record<string, unknown> = {};
+      if (options.deploymentId !== undefined) {
+        body.deploymentId = options.deploymentId;
+      }
+      if (options.input !== undefined) {
+        body.input = options.input;
+      }
+      const res = await this.request<Run>(
+        "POST",
+        `/v1/runs/${encodeURIComponent(options.runId)}/rerun`,
+        headers,
+        body,
+      );
+      return res.data;
+    },
   };
 
   readonly deployments = {
@@ -390,6 +422,101 @@ export class DeadboltClient {
         {},
         manifest,
       );
+      return res.data;
+    },
+
+    /**
+     * Lists registered deployments for the environment.
+     */
+    list: async (options?: {
+      limit?: number;
+      cursor?: string;
+    }): Promise<{
+      items: Array<{
+        id: string;
+        manifestHash: string;
+        bundleDigest: string;
+        status: string;
+        createdAt: string;
+        compatibilityWarningAt?: string | null;
+      }>;
+      nextCursor: string | null;
+    }> => {
+      const q = new URLSearchParams();
+      if (options?.limit) q.set("limit", String(options.limit));
+      if (options?.cursor) q.set("cursor", options.cursor);
+      const suffix = q.toString() ? `?${q.toString()}` : "";
+      const res = await this.request<{
+        items: Array<{
+          id: string;
+          manifestHash: string;
+          bundleDigest: string;
+          status: string;
+          createdAt: string;
+          compatibilityWarningAt?: string | null;
+        }>;
+        nextCursor: string | null;
+      }>("GET", `/v1/deployments${suffix}`);
+      return res.data;
+    },
+
+    /**
+     * Deletes an unreferenced deployment registration.
+     */
+    delete: async (deploymentId: string, idempotencyKey?: string): Promise<void> => {
+      const headers: Record<string, string> = {
+        "Idempotency-Key": idempotencyKey || `delete-dep-${deploymentId}-${Date.now()}`,
+      };
+      await this.request<void>(
+        "DELETE",
+        `/v1/deployments/${encodeURIComponent(deploymentId)}`,
+        headers,
+      );
+    },
+  };
+
+  readonly workflows = {
+    /**
+     * Activates a deployment for new workflow runs.
+     */
+    activate: async (options: {
+      workflowName: string;
+      deploymentId: string;
+      expectedRevision: number;
+      allowSingleWorker?: boolean;
+      idempotencyKey?: string;
+    }): Promise<{ name: string; activeDeploymentId: string | null; revision: number; warning?: string }> => {
+      const headers: Record<string, string> = {
+        "Idempotency-Key": options.idempotencyKey || `activate-${options.workflowName}-${Date.now()}`,
+      };
+      const res = await this.request<{ name: string; activeDeploymentId: string | null; revision: number; warning?: string }>(
+        "POST",
+        `/v1/workflows/${encodeURIComponent(options.workflowName)}/activate`,
+        headers,
+        {
+          deploymentId: options.deploymentId,
+          expectedRevision: options.expectedRevision,
+          allowSingleWorker: options.allowSingleWorker ?? false,
+        },
+      );
+      return res.data;
+    },
+
+    /**
+     * Lists workflows in the environment.
+     */
+    list: async (options?: {
+      limit?: number;
+      cursor?: string;
+    }): Promise<{ items: Array<{ name: string; activeDeploymentId: string | null; revision: number; warning?: string }>; nextCursor: string | null }> => {
+      const q = new URLSearchParams();
+      if (options?.limit) q.set("limit", String(options.limit));
+      if (options?.cursor) q.set("cursor", options.cursor);
+      const suffix = q.toString() ? `?${q.toString()}` : "";
+      const res = await this.request<{
+        items: Array<{ name: string; activeDeploymentId: string | null; revision: number; warning?: string }>;
+        nextCursor: string | null;
+      }>("GET", `/v1/workflows${suffix}`);
       return res.data;
     },
   };
