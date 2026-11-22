@@ -145,4 +145,15 @@ test("DeadboltClient webhooks wire methods construct expected requests", async (
   const redelivered = await client.webhooks.redeliver("del-1");
   assert.equal(redelivered.id, "del-2");
   assert.equal(redelivered.status, "PENDING");
+
+  const redeliveredWithEndpoint = await client.webhooks.redeliver("del-1", {
+    endpointId: "ep-2",
+  });
+  assert.equal(redeliveredWithEndpoint.id, "del-2");
+  const lastCall = recorded[recorded.length - 1];
+  assert.equal(
+    lastCall.url,
+    "https://api.deadbolt.test/v1/webhook-deliveries/del-1/redeliver",
+  );
+  assert.equal(lastCall.body, JSON.stringify({ endpointId: "ep-2" }));
 });

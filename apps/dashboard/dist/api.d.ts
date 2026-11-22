@@ -1,4 +1,4 @@
-import { Run, Worker, RunSnapshot, RunEventsResponse, TaskLogsResponse, ResolveReconciliationRequest, ResolveReconciliationResponse, Approval, Schedule, ScheduleOccurrence, WebhookEndpoint, WebhookDelivery } from "./types.js";
+import { Run, Worker, RunSnapshot, RunEventsResponse, TaskLogsResponse, ResolveReconciliationRequest, ResolveReconciliationResponse, Approval, Schedule, ScheduleOccurrence, WebhookEndpoint, WebhookDelivery, OrganizationMember, APIKeySummary, GeneratedKey } from "./types.js";
 export interface ListRunsResponse {
     items: Run[];
     nextCursor?: string | null;
@@ -134,6 +134,15 @@ export declare class DashboardApiClient {
         items: WebhookDelivery[];
         nextCursor?: string | null;
     }>;
-    redeliverWebhook(deliveryId: string): Promise<WebhookDelivery>;
+    redeliverWebhook(deliveryId: string, newEndpointId?: string): Promise<WebhookDelivery>;
+    listMembers(orgId: string): Promise<OrganizationMember[]>;
+    addMember(orgId: string, userId: string, role: string, idempotencyKey?: string): Promise<OrganizationMember>;
+    updateMemberRole(orgId: string, userId: string, role: string, idempotencyKey?: string): Promise<void>;
+    updateMemberStatus(orgId: string, userId: string, status: string, idempotencyKey?: string): Promise<void>;
+    removeMember(orgId: string, userId: string, idempotencyKey?: string): Promise<void>;
+    listApiKeys(envId: string): Promise<APIKeySummary[]>;
+    createApiKey(envId: string, capabilities: string[], expiryDays?: number, idempotencyKey?: string): Promise<GeneratedKey>;
+    rotateApiKey(keyId: string, expiryDays?: number, idempotencyKey?: string): Promise<GeneratedKey>;
+    revokeApiKey(keyId: string, idempotencyKey?: string): Promise<void>;
 }
 //# sourceMappingURL=api.d.ts.map

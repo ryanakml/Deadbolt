@@ -201,4 +201,34 @@ export interface WebhookDelivery {
     lastError?: string | null;
     responseSnippet?: string | null;
 }
+export interface OrganizationMember {
+    id: string;
+    organizationId: string;
+    userId: string;
+    role: "owner" | "admin" | "operator" | "developer" | "viewer" | string;
+    status: "ACTIVE" | "SUSPENDED" | string;
+    createdAt: string;
+    updatedAt: string;
+}
+export interface APIKeySummary {
+    id: string;
+    environmentId: string;
+    environmentName: string;
+    prefix: string;
+    capabilities: string[];
+    expiresAt?: string | null;
+    revokedAt?: string | null;
+    createdAt: string;
+    lastUsedAt?: string | null;
+}
+export interface GeneratedKey {
+    id: string;
+    key?: string;
+    prefix: string;
+    environmentId: string;
+    environmentName: string;
+    capabilities: string[];
+    expiresAt?: string | null;
+    createdAt: string;
+}
 //# sourceMappingURL=types.d.ts.map

@@ -165,4 +165,64 @@ export function visibleRerunControl(status, canControl) {
         return false;
     return (status === "SUCCEEDED" || status === "FAILED" || status === "CANCELLED");
 }
+export const ADMIN_MEMBER_CAPABILITY = "admin:member";
+const ADMIN_MEMBER_ROLES = new Set(["admin", "owner"]);
+export function roleCanManageMembers(role) {
+    if (!role)
+        return false;
+    return ADMIN_MEMBER_ROLES.has(role.trim().toLowerCase());
+}
+export function sessionCanManageMembers(session, orgId) {
+    if (!session || !orgId)
+        return false;
+    const memberships = session.memberships ?? [];
+    for (const m of memberships) {
+        if (!m || m.OrganizationID !== orgId)
+            continue;
+        if (String(m.Status ?? "").toUpperCase() !== "ACTIVE")
+            continue;
+        return roleCanManageMembers(m.Role);
+    }
+    return false;
+}
+export const ADMIN_KEY_CAPABILITY = "admin:key";
+const ADMIN_KEY_ROLES = new Set(["admin", "owner"]);
+export function roleCanManageKeys(role) {
+    if (!role)
+        return false;
+    return ADMIN_KEY_ROLES.has(role.trim().toLowerCase());
+}
+export function sessionCanManageKeys(session, orgId) {
+    if (!session || !orgId)
+        return false;
+    const memberships = session.memberships ?? [];
+    for (const m of memberships) {
+        if (!m || m.OrganizationID !== orgId)
+            continue;
+        if (String(m.Status ?? "").toUpperCase() !== "ACTIVE")
+            continue;
+        return roleCanManageKeys(m.Role);
+    }
+    return false;
+}
+export const PAYLOAD_READ_CAPABILITY = "payload:read";
+const PAYLOAD_READ_ROLES = new Set(["developer", "operator", "admin", "owner"]);
+export function roleCanReadPayload(role) {
+    if (!role)
+        return false;
+    return PAYLOAD_READ_ROLES.has(role.trim().toLowerCase());
+}
+export function sessionCanReadPayload(session, orgId) {
+    if (!session || !orgId)
+        return false;
+    const memberships = session.memberships ?? [];
+    for (const m of memberships) {
+        if (!m || m.OrganizationID !== orgId)
+            continue;
+        if (String(m.Status ?? "").toUpperCase() !== "ACTIVE")
+            continue;
+        return roleCanReadPayload(m.Role);
+    }
+    return false;
+}
 //# sourceMappingURL=permissions.js.map

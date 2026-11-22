@@ -442,8 +442,9 @@ func (s *Service) ListDeliveries(ctx context.Context, orgID, endpointID string, 
 }
 
 // Redeliver creates a new delivery attempt for an existing event, pinning the
-// endpoint's current active revision (Blueprint §21).
-func (s *Service) Redeliver(ctx context.Context, orgID, deliveryID string, audit *tenant.AuditContext) (*WebhookDelivery, error) {
+// endpoint's current active revision (Blueprint §21). If newEndpointID is specified,
+// the delivery is routed to the new target endpoint while preserving the original event ID.
+func (s *Service) Redeliver(ctx context.Context, orgID, deliveryID string, newEndpointID *string, audit *tenant.AuditContext) (*WebhookDelivery, error) {
 	if audit == nil {
 		return nil, tenant.ErrAuditRequired
 	}
@@ -467,12 +468,17 @@ func (s *Service) Redeliver(ctx context.Context, orgID, deliveryID string, audit
 			return err
 		}
 
+		targetEndpointID := orig.EndpointID
+		if newEndpointID != nil && *newEndpointID != "" {
+			targetEndpointID = *newEndpointID
+		}
+
 		var endpointActive bool
 		var currentRevision int64
 		err = tx.QueryRow(ctx, `
 			SELECT active, revision FROM webhook_endpoints
 			WHERE id = $1::uuid AND organization_id = $2::uuid
-		`, orig.EndpointID, orgID).Scan(&endpointActive, &currentRevision)
+		`, targetEndpointID, orgID).Scan(&endpointActive, &currentRevision)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrEndpointNotFound
@@ -481,7 +487,7 @@ func (s *Service) Redeliver(ctx context.Context, orgID, deliveryID string, audit
 		}
 
 		if !endpointActive {
-			return errors.New("cannot redeliver to inactive webhook endpoint")
+			return ErrEndpointInactive
 		}
 
 		newID, _ := tenant.NewUUID()
@@ -495,7 +501,7 @@ func (s *Service) Redeliver(ctx context.Context, orgID, deliveryID string, audit
 			)
 			RETURNING id::text, organization_id::text, endpoint_id::text, endpoint_revision,
 			          event_id::text, event_type, run_id::text, attempts, status, next_at, created_at
-		`, newID, orgID, orig.EndpointID, currentRevision, orig.EventID, orig.EventType,
+		`, newID, orgID, targetEndpointID, currentRevision, orig.EventID, orig.EventType,
 			origRunID, origPayload,
 		)
 
@@ -512,7 +518,8 @@ func (s *Service) Redeliver(ctx context.Context, orgID, deliveryID string, audit
 
 		return s.recordAudit(ctx, tx, orgID, "webhook_delivery.redelivered", newDelivery.ID, "WEBHOOK_DELIVERY", map[string]any{
 			"originalDeliveryId": deliveryID,
-			"endpointId":         orig.EndpointID,
+			"originalEndpointId": orig.EndpointID,
+			"endpointId":         targetEndpointID,
 			"revision":           currentRevision,
 		}, audit)
 	})

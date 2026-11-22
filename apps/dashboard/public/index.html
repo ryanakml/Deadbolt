@@ -26,6 +26,9 @@
           <button id="nav-webhooks" class="nav-btn" type="button">
             Webhooks
           </button>
+          <button id="nav-settings" class="nav-btn" type="button">
+            Settings
+          </button>
         </nav>
       </div>
       <div class="header-right">
@@ -216,16 +219,108 @@
                 <th scope="col">Status</th>
                 <th scope="col">Attempts</th>
                 <th scope="col">Last Status</th>
+                <th scope="col">Response / Error</th>
+                <th scope="col">Next Retry</th>
                 <th scope="col">Created At</th>
                 <th scope="col">Actions</th>
               </tr>
             </thead>
             <tbody id="deliveries-table-body">
               <tr>
-                <td colspan="7" class="loading">Loading deliveries...</td>
+                <td colspan="9" class="loading">Loading deliveries...</td>
               </tr>
             </tbody>
           </table>
+        </div>
+      </section>
+
+      <!-- Settings View -->
+      <section
+        id="settings-view"
+        class="view-panel hidden"
+        aria-labelledby="settings-heading"
+      >
+        <div class="panel-header">
+          <h2 id="settings-heading">Organization & Access Settings</h2>
+        </div>
+
+        <div
+          id="settings-secret-alert"
+          class="info-banner hidden"
+          role="status"
+        ></div>
+        <div
+          id="settings-error-alert"
+          class="error-banner hidden"
+          role="alert"
+        ></div>
+
+        <div class="settings-section">
+          <div class="panel-header">
+            <h3>Team Members</h3>
+            <button
+              id="members-add-btn"
+              class="primary-btn hidden"
+              type="button"
+            >
+              Add Member
+            </button>
+          </div>
+          <p class="text-muted">
+            Manage tenant members, role table enforcement, and last-owner
+            protection.
+          </p>
+          <div class="table-container">
+            <table class="data-table" aria-label="Organization Members Table">
+              <thead>
+                <tr>
+                  <th scope="col">User ID</th>
+                  <th scope="col">Role</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Created At</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="members-table-body">
+                <tr>
+                  <td colspan="5" class="loading">Loading members...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="settings-section" style="margin-top: 2rem">
+          <div class="panel-header">
+            <h3>Environment API Keys</h3>
+            <button id="keys-new-btn" class="primary-btn hidden" type="button">
+              Create API Key
+            </button>
+          </div>
+          <p class="text-muted">
+            Manage machine identities scoped strictly to the selected
+            environment. Secret keys are shown once upon issuance.
+          </p>
+          <div class="table-container">
+            <table class="data-table" aria-label="API Keys Table">
+              <thead>
+                <tr>
+                  <th scope="col">Prefix</th>
+                  <th scope="col">Environment</th>
+                  <th scope="col">Capabilities</th>
+                  <th scope="col">Expires At</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Created At</th>
+                  <th scope="col">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="keys-table-body">
+                <tr>
+                  <td colspan="7" class="loading">Loading API keys...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </div>
       </section>
 

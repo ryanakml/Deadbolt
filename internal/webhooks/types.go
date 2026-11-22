@@ -35,13 +35,14 @@ const (
 )
 
 var (
-	ErrEndpointNotFound = errors.New("webhook endpoint not found")
-	ErrDeliveryNotFound = errors.New("webhook delivery not found")
-	ErrRevisionConflict = errors.New("webhook endpoint revision conflict")
-	ErrInvalidURL       = errors.New("invalid webhook URL")
-	ErrSSRFBlocked      = errors.New("destination IP or address blocked by SSRF defense")
-	ErrInvalidEvent     = errors.New("unsupported webhook event type")
-	ErrInvalidSignatureHeader = errors.New("invalid signature header format")
+	ErrEndpointNotFound        = errors.New("webhook endpoint not found")
+	ErrDeliveryNotFound        = errors.New("webhook delivery not found")
+	ErrRevisionConflict        = errors.New("webhook endpoint revision conflict")
+	ErrInvalidURL              = errors.New("invalid webhook URL")
+	ErrSSRFBlocked             = errors.New("destination IP or address blocked by SSRF defense")
+	ErrInvalidEvent            = errors.New("unsupported webhook event type")
+	ErrInvalidSignatureHeader  = errors.New("invalid signature header format")
+	ErrEndpointInactive        = errors.New("cannot redeliver to inactive webhook endpoint")
 )
 
 // ValidEventTypes returns true if event is one of the supported V1 webhook events
