@@ -18,6 +18,7 @@ import (
 	"github.com/Ryanakml/Deadbolt/internal/scheduling"
 	"github.com/Ryanakml/Deadbolt/internal/storage"
 	"github.com/Ryanakml/Deadbolt/internal/tenant"
+	"github.com/Ryanakml/Deadbolt/internal/webhooks"
 	"github.com/Ryanakml/Deadbolt/internal/worker"
 )
 
@@ -156,6 +157,25 @@ func BuildMuxWithComponents(cfg auth.Config, pool *pgxpool.Pool, healthChecker *
 		mux.Handle("POST /v1/schedules/{id}/pause", sched(scheduleHandler.Pause))
 		mux.Handle("POST /api/v1/schedules/{id}/resume", sched(scheduleHandler.Resume))
 		mux.Handle("POST /v1/schedules/{id}/resume", sched(scheduleHandler.Resume))
+
+		// Signed Webhooks (Blueprint §21, Issue #39)
+		webhookSvc := webhooks.NewService(storagePool, webhooks.DefaultMasterKey(), webhooks.DefaultSSRFConfig())
+		webhookHandler := webhooks.NewHTTPHandler(webhookSvc, tenantService)
+		hook := func(handle http.HandlerFunc) http.Handler {
+			return tenantHandler.WithRequestID(tenantHandler.RequireAuth(tenantHandler.RequireOrgScope(tenant.CapWebhooksWrite, handle)))
+		}
+		mux.Handle("GET /api/v1/webhook-endpoints", hook(webhookHandler.ListEndpoints))
+		mux.Handle("GET /v1/webhook-endpoints", hook(webhookHandler.ListEndpoints))
+		mux.Handle("POST /api/v1/webhook-endpoints", hook(webhookHandler.CreateEndpoint))
+		mux.Handle("POST /v1/webhook-endpoints", hook(webhookHandler.CreateEndpoint))
+		mux.Handle("PATCH /api/v1/webhook-endpoints/{id}", hook(webhookHandler.UpdateEndpoint))
+		mux.Handle("PATCH /v1/webhook-endpoints/{id}", hook(webhookHandler.UpdateEndpoint))
+		mux.Handle("DELETE /api/v1/webhook-endpoints/{id}", hook(webhookHandler.DeleteEndpoint))
+		mux.Handle("DELETE /v1/webhook-endpoints/{id}", hook(webhookHandler.DeleteEndpoint))
+		mux.Handle("GET /api/v1/webhook-endpoints/{id}/deliveries", hook(webhookHandler.ListDeliveries))
+		mux.Handle("GET /v1/webhook-endpoints/{id}/deliveries", hook(webhookHandler.ListDeliveries))
+		mux.Handle("POST /api/v1/webhook-deliveries/{id}/redeliver", hook(webhookHandler.Redeliver))
+		mux.Handle("POST /v1/webhook-deliveries/{id}/redeliver", hook(webhookHandler.Redeliver))
 
 		// Scoped artifacts: worker sessions (dbs_ bearers) authenticate
 		// through the worker chain with attempt-ownership checks inside the

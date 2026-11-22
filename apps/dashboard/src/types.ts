@@ -254,3 +254,32 @@ export interface ResyncControlEvent {
   code?: "RESYNC_REQUIRED" | string;
   lastAvailableSequence: number;
 }
+
+export interface WebhookEndpoint {
+  id: string;
+  url: string;
+  enabled: boolean;
+  revision: number;
+  eventTypes: string[];
+  signingKeyId?: string;
+  secret?: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  endpointId: string;
+  endpointRevision: number;
+  eventId: string;
+  eventType: string;
+  runId?: string | null;
+  payload?: unknown;
+  attempts: number;
+  status: "PENDING" | "DELIVERED" | "FAILED" | "CANCELLED";
+  nextAt?: string;
+  createdAt: string;
+  deliveredAt?: string | null;
+  completedAt?: string | null;
+  lastStatusCode?: number | null;
+  lastError?: string | null;
+  responseSnippet?: string | null;
+}

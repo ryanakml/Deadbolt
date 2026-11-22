@@ -1,6 +1,64 @@
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { ContractError, fail, type JSONValue } from "./json.js";
 import type { RunStatus, StepStatus } from "./enums.js";
 import { type ObjectValue } from "./schema.js";
+
+export interface WebhookEndpoint {
+  id: string;
+  url: string;
+  enabled: boolean;
+  revision: number;
+  eventTypes: string[];
+  secret?: string;
+  signingKeyId?: string;
+}
+
+export interface WebhookDelivery {
+  id: string;
+  endpointId: string;
+  endpointRevision: number;
+  eventId: string;
+  eventType: string;
+  runId?: string;
+  payload: Record<string, unknown>;
+  attempts: number;
+  status: "PENDING" | "DELIVERED" | "FAILED" | "CANCELLED";
+  nextAt: string;
+  deliveredAt?: string;
+  lastStatusCode?: number;
+  lastError?: string;
+  responseSnippet?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+/**
+ * Verifies that a webhook request came from Deadbolt by checking the HMAC-SHA256
+ * signature over timestamp.body and ensuring the timestamp is within tolerance.
+ */
+export function verifyWebhookSignature(
+  secret: string,
+  timestamp: number,
+  body: string | Buffer,
+  signatureHex: string,
+  toleranceSeconds = 300,
+): boolean {
+  const now = Math.floor(Date.now() / 1000);
+  if (Math.abs(now - timestamp) > toleranceSeconds) {
+    return false;
+  }
+  const payloadToSign = `${timestamp}.${typeof body === "string" ? body : body.toString("utf8")}`;
+  const hmac = createHmac("sha256", secret);
+  hmac.update(payloadToSign);
+  const expectedHex = hmac.digest("hex");
+  if (expectedHex.length !== signatureHex.length) {
+    return false;
+  }
+  return timingSafeEqual(
+    Buffer.from(expectedHex, "hex"),
+    Buffer.from(signatureHex, "hex"),
+  );
+}
 
 export interface ErrorEnvelope {
   code: string;
@@ -615,6 +673,149 @@ export class DeadboltClient {
         downloadUrl: string;
         expiresAt: string;
       }>("GET", `/v1/artifacts/${encodeURIComponent(id)}`);
+      return res.data;
+    },
+  };
+
+  readonly webhooks = {
+    /**
+     * Lists webhook endpoints in the environment.
+     */
+    list: async (
+      environment: string,
+      options?: { limit?: number; cursor?: string },
+    ): Promise<{ items: WebhookEndpoint[]; nextCursor: string | null }> => {
+      const q = new URLSearchParams({ environment });
+      if (options?.limit) q.set("limit", String(options.limit));
+      if (options?.cursor) q.set("cursor", options.cursor);
+      const res = await this.request<{
+        items: WebhookEndpoint[];
+        nextCursor: string | null;
+      }>("GET", `/v1/webhook-endpoints?${q.toString()}`);
+      return res.data;
+    },
+
+    /**
+     * Registers a new webhook endpoint in the environment.
+     */
+    create: async (
+      environment: string,
+      options: {
+        url: string;
+        enabled: boolean;
+        eventTypes: string[];
+        idempotencyKey?: string;
+      },
+    ): Promise<WebhookEndpoint> => {
+      const q = new URLSearchParams({ environment });
+      const headers: Record<string, string> = {};
+      if (options.idempotencyKey) {
+        headers["Idempotency-Key"] = options.idempotencyKey;
+      }
+      const res = await this.request<WebhookEndpoint>(
+        "POST",
+        `/v1/webhook-endpoints?${q.toString()}`,
+        headers,
+        {
+          url: options.url,
+          enabled: options.enabled,
+          eventTypes: options.eventTypes,
+        },
+      );
+      return res.data;
+    },
+
+    /**
+     * Updates an existing webhook endpoint configuration with optimistic revision CAS.
+     */
+    update: async (
+      id: string,
+      options: {
+        expectedRevision: number;
+        configuration?: {
+          url?: string;
+          enabled?: boolean;
+          eventTypes?: string[];
+        };
+        rotateSecret?: boolean;
+        idempotencyKey?: string;
+      },
+    ): Promise<WebhookEndpoint> => {
+      const headers: Record<string, string> = {};
+      if (options.idempotencyKey) {
+        headers["Idempotency-Key"] = options.idempotencyKey;
+      }
+      const res = await this.request<WebhookEndpoint>(
+        "PATCH",
+        `/v1/webhook-endpoints/${encodeURIComponent(id)}`,
+        headers,
+        {
+          expectedRevision: options.expectedRevision,
+          configuration: options.configuration,
+          rotateSecret: options.rotateSecret,
+        },
+      );
+      return res.data;
+    },
+
+    /**
+     * Deletes a webhook endpoint.
+     */
+    delete: async (
+      id: string,
+      expectedRevision: number,
+      options?: { idempotencyKey?: string },
+    ): Promise<{ deleted: boolean }> => {
+      const headers: Record<string, string> = {};
+      if (options?.idempotencyKey) {
+        headers["Idempotency-Key"] = options.idempotencyKey;
+      }
+      const res = await this.request<{ deleted: boolean }>(
+        "DELETE",
+        `/v1/webhook-endpoints/${encodeURIComponent(id)}`,
+        headers,
+        { expectedRevision },
+      );
+      return res.data;
+    },
+
+    /**
+     * Lists delivery attempts for an endpoint.
+     */
+    listDeliveries: async (
+      endpointId: string,
+      options?: { limit?: number; cursor?: string },
+    ): Promise<{ items: WebhookDelivery[]; nextCursor: string | null }> => {
+      const q = new URLSearchParams();
+      if (options?.limit) q.set("limit", String(options.limit));
+      if (options?.cursor) q.set("cursor", options.cursor);
+      const suffix = q.toString() ? `?${q.toString()}` : "";
+      const res = await this.request<{
+        items: WebhookDelivery[];
+        nextCursor: string | null;
+      }>(
+        "GET",
+        `/v1/webhook-endpoints/${encodeURIComponent(endpointId)}/deliveries${suffix}`,
+      );
+      return res.data;
+    },
+
+    /**
+     * Re-dispatches an existing event delivery to the endpoint's current active revision.
+     */
+    redeliver: async (
+      deliveryId: string,
+      options?: { idempotencyKey?: string },
+    ): Promise<WebhookDelivery> => {
+      const headers: Record<string, string> = {};
+      if (options?.idempotencyKey) {
+        headers["Idempotency-Key"] = options.idempotencyKey;
+      }
+      const res = await this.request<WebhookDelivery>(
+        "POST",
+        `/v1/webhook-deliveries/${encodeURIComponent(deliveryId)}/redeliver`,
+        headers,
+      );
       return res.data;
     },
   };

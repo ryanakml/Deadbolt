@@ -561,5 +561,99 @@ export class DashboardApiClient {
         }
         return catalog;
     }
+    // listWebhookEndpoints lists webhook endpoints in the current environment.
+    async listWebhookEndpoints(environmentId, limit, cursor) {
+        const q = new URLSearchParams({ environment: environmentId });
+        if (limit)
+            q.set("limit", String(limit));
+        if (cursor)
+            q.set("cursor", cursor);
+        const res = await apiFetch(`${this.baseUrl}/v1/webhook-endpoints?${q.toString()}`);
+        if (!res.ok) {
+            throw new Error(`Failed to list webhook endpoints (HTTP ${res.status}): ${res.statusText}`);
+        }
+        const body = (await res.json());
+        return { items: body.items ?? [], nextCursor: body.nextCursor ?? null };
+    }
+    // createWebhookEndpoint registers a new webhook endpoint.
+    async createWebhookEndpoint(environmentId, url, eventTypes, enabled = true) {
+        const q = new URLSearchParams({ environment: environmentId });
+        const res = await apiFetch(`${this.baseUrl}/v1/webhook-endpoints?${q.toString()}`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": readCsrfToken(),
+            },
+            body: JSON.stringify({ url, eventTypes, enabled }),
+        });
+        if (!res.ok) {
+            throw new Error(`Failed to create webhook endpoint (HTTP ${res.status}): ${res.statusText}`);
+        }
+        return res.json();
+    }
+    // updateWebhookEndpoint updates URL, enabled status, or rotates secret.
+    async updateWebhookEndpoint(endpointId, expectedRevision, config, rotateSecret) {
+        const res = await apiFetch(`${this.baseUrl}/v1/webhook-endpoints/${encodeURIComponent(endpointId)}`, {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": readCsrfToken(),
+            },
+            body: JSON.stringify({
+                expectedRevision,
+                configuration: config,
+                rotateSecret: rotateSecret ?? false,
+            }),
+        });
+        if (!res.ok) {
+            throw new Error(`Failed to update webhook endpoint (HTTP ${res.status}): ${res.statusText}`);
+        }
+        return res.json();
+    }
+    // deleteWebhookEndpoint deletes a webhook endpoint.
+    async deleteWebhookEndpoint(endpointId, expectedRevision) {
+        const res = await apiFetch(`${this.baseUrl}/v1/webhook-endpoints/${encodeURIComponent(endpointId)}`, {
+            method: "DELETE",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": readCsrfToken(),
+            },
+            body: JSON.stringify({ expectedRevision }),
+        });
+        if (!res.ok) {
+            throw new Error(`Failed to delete webhook endpoint (HTTP ${res.status}): ${res.statusText}`);
+        }
+    }
+    // listWebhookDeliveries lists deliveries for a specific endpoint.
+    async listWebhookDeliveries(endpointId, limit, cursor) {
+        const q = new URLSearchParams();
+        if (limit)
+            q.set("limit", String(limit));
+        if (cursor)
+            q.set("cursor", cursor);
+        const qs = q.toString();
+        const url = `${this.baseUrl}/v1/webhook-endpoints/${encodeURIComponent(endpointId)}/deliveries${qs ? `?${qs}` : ""}`;
+        const res = await apiFetch(url);
+        if (!res.ok) {
+            throw new Error(`Failed to list webhook deliveries (HTTP ${res.status}): ${res.statusText}`);
+        }
+        const body = (await res.json());
+        return { items: body.items ?? [], nextCursor: body.nextCursor ?? null };
+    }
+    // redeliverWebhook re-enqueues a webhook delivery.
+    async redeliverWebhook(deliveryId) {
+        const res = await apiFetch(`${this.baseUrl}/v1/webhook-deliveries/${encodeURIComponent(deliveryId)}/redeliver`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": readCsrfToken(),
+            },
+            body: JSON.stringify({}),
+        });
+        if (!res.ok) {
+            throw new Error(`Failed to redeliver webhook (HTTP ${res.status}): ${res.statusText}`);
+        }
+        return res.json();
+    }
 }
 //# sourceMappingURL=api.js.map

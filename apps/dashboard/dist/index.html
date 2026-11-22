@@ -23,6 +23,9 @@
           <button id="nav-deployments" class="nav-btn" type="button">
             Deployments
           </button>
+          <button id="nav-webhooks" class="nav-btn" type="button">
+            Webhooks
+          </button>
         </nav>
       </div>
       <div class="header-right">
@@ -155,6 +158,74 @@
         </div>
         <div id="schedules-list" class="schedule-list">
           <div class="loading">Loading schedules...</div>
+        </div>
+      </section>
+
+      <!-- Webhooks List View -->
+      <section
+        id="webhooks-view"
+        class="view-panel hidden"
+        aria-labelledby="webhooks-heading"
+      >
+        <div class="panel-header">
+          <h2 id="webhooks-heading">Webhooks</h2>
+          <button
+            id="webhooks-new-btn"
+            class="primary-btn hidden"
+            type="button"
+          >
+            New webhook
+          </button>
+        </div>
+        <div
+          id="webhooks-secret-alert"
+          class="info-banner hidden"
+          role="status"
+        ></div>
+        <div class="table-container">
+          <table class="data-table" aria-label="Webhooks Table">
+            <thead>
+              <tr>
+                <th scope="col">URL</th>
+                <th scope="col">Events</th>
+                <th scope="col">Status</th>
+                <th scope="col">Revision</th>
+                <th scope="col">Key ID</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="webhooks-table-body">
+              <tr>
+                <td colspan="6" class="loading">Loading webhooks...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div id="deliveries-panel" class="deliveries-container hidden">
+          <div class="panel-header">
+            <h3 id="deliveries-heading">Recent Deliveries</h3>
+            <button id="deliveries-close-btn" class="icon-btn" type="button">
+              Close
+            </button>
+          </div>
+          <table class="data-table" aria-label="Deliveries Table">
+            <thead>
+              <tr>
+                <th scope="col">Delivery ID</th>
+                <th scope="col">Event</th>
+                <th scope="col">Status</th>
+                <th scope="col">Attempts</th>
+                <th scope="col">Last Status</th>
+                <th scope="col">Created At</th>
+                <th scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="deliveries-table-body">
+              <tr>
+                <td colspan="7" class="loading">Loading deliveries...</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </section>
 

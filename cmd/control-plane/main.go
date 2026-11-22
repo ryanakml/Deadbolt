@@ -29,6 +29,7 @@ import (
 	"github.com/Ryanakml/Deadbolt/internal/storage"
 	"github.com/Ryanakml/Deadbolt/internal/storage/migrator"
 	"github.com/Ryanakml/Deadbolt/internal/tenant"
+	"github.com/Ryanakml/Deadbolt/internal/webhooks"
 )
 
 var (
@@ -407,6 +408,15 @@ func run() error {
 				logger.Printf("[OUTBOX] Broker manager terminated: %v", err)
 			}
 		}()
+
+		// Start Webhook Dispatcher (Blueprint §21, Issue #39)
+		webhookDispatcher := webhooks.NewDispatcher(dispatchPool, webhooks.DefaultMasterKey(), webhooks.DefaultDispatcherConfig(), logger)
+		go func() {
+			if err := webhookDispatcher.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Printf("[WEBHOOKS] Dispatcher loop terminated: %v", err)
+			}
+		}()
+		defer webhookDispatcher.Stop()
 	}
 
 	mux := BuildMuxWithComponents(cfg, pool, healthChecker, outboxMetrics, logger, eventHub, workerEngine)
