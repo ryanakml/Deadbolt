@@ -200,10 +200,21 @@ jobs:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
         with:
           persist-credentials: false
+          fetch-depth: 0
+      - uses: pnpm/action-setup@f40ffcd9367d9f12939873eb1018b921a783ffaa # v4
+        with:
+          version: 10.24.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: 24.21.0
+          cache: pnpm
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version: 1.27.4
           cache: true
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Build runtime runner for worker tests
+        run: pnpm --filter @runtime/runner run build
       - name: Run Go unit and spike tests under race detector
         run: |
           go test -race -timeout 10m ./cmd/... ./contracts/... ./internal/... ./tests/spikes/...
