@@ -801,20 +801,25 @@ export class DeadboltClient {
     },
 
     /**
-     * Re-dispatches an existing event delivery to the endpoint's current active revision.
+     * Re-dispatches an existing event delivery to the endpoint's current active revision,
+     * or to an explicit new destination endpoint when endpointId is specified.
      */
     redeliver: async (
       deliveryId: string,
-      options?: { idempotencyKey?: string },
+      options?: { endpointId?: string; idempotencyKey?: string },
     ): Promise<WebhookDelivery> => {
       const headers: Record<string, string> = {};
       if (options?.idempotencyKey) {
         headers["Idempotency-Key"] = options.idempotencyKey;
       }
+      const body = options?.endpointId
+        ? { endpointId: options.endpointId }
+        : undefined;
       const res = await this.request<WebhookDelivery>(
         "POST",
         `/v1/webhook-deliveries/${encodeURIComponent(deliveryId)}/redeliver`,
         headers,
+        body,
       );
       return res.data;
     },

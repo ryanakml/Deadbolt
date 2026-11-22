@@ -11,6 +11,9 @@ import {
   ScheduleOccurrence,
   WebhookEndpoint,
   WebhookDelivery,
+  OrganizationMember,
+  APIKeySummary,
+  GeneratedKey,
 } from "./types.js";
 
 export interface ListRunsResponse {
@@ -1044,8 +1047,15 @@ export class DashboardApiClient {
     return { items: body.items ?? [], nextCursor: body.nextCursor ?? null };
   }
 
-  // redeliverWebhook re-enqueues a webhook delivery.
-  public async redeliverWebhook(deliveryId: string): Promise<WebhookDelivery> {
+  // redeliverWebhook re-enqueues a webhook delivery, optionally to an explicit new destination endpoint.
+  public async redeliverWebhook(
+    deliveryId: string,
+    newEndpointId?: string,
+  ): Promise<WebhookDelivery> {
+    const body: Record<string, string> = {};
+    if (newEndpointId) {
+      body.endpointId = newEndpointId;
+    }
     const res = await apiFetch(
       `${this.baseUrl}/v1/webhook-deliveries/${encodeURIComponent(deliveryId)}/redeliver`,
       {
@@ -1054,14 +1064,236 @@ export class DashboardApiClient {
           "Content-Type": "application/json",
           "X-CSRF-Token": readCsrfToken(),
         },
-        body: JSON.stringify({}),
+        body: JSON.stringify(body),
       },
     );
     if (!res.ok) {
-      throw new Error(
-        `Failed to redeliver webhook (HTTP ${res.status}): ${res.statusText}`,
+      const errMsg = await extractErrorMessage(
+        res,
+        "Failed to redeliver webhook",
       );
+      throw new Error(errMsg);
     }
     return res.json() as Promise<WebhookDelivery>;
   }
+
+  // listMembers lists all members of an organization.
+  public async listMembers(orgId: string): Promise<OrganizationMember[]> {
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/organizations/${encodeURIComponent(orgId)}/members`,
+    );
+    if (!res.ok) {
+      const errMsg = await extractErrorMessage(res, "Failed to list members");
+      throw new Error(errMsg);
+    }
+    const body = (await res.json()) as { members?: OrganizationMember[] };
+    return body.members ?? [];
+  }
+
+  // addMember adds a new member to an organization.
+  public async addMember(
+    orgId: string,
+    userId: string,
+    role: string,
+    idempotencyKey?: string,
+  ): Promise<OrganizationMember> {
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/organizations/${encodeURIComponent(orgId)}/members`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": readCsrfToken(),
+          "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+        },
+        body: JSON.stringify({ userId, role }),
+      },
+    );
+    if (!res.ok) {
+      const errMsg = await extractErrorMessage(res, "Failed to add member");
+      throw new Error(errMsg);
+    }
+    return res.json() as Promise<OrganizationMember>;
+  }
+
+  // updateMemberRole updates a member's role.
+  public async updateMemberRole(
+    orgId: string,
+    userId: string,
+    role: string,
+    idempotencyKey?: string,
+  ): Promise<void> {
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": readCsrfToken(),
+          "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+        },
+        body: JSON.stringify({ role }),
+      },
+    );
+    if (!res.ok) {
+      const errMsg = await extractErrorMessage(
+        res,
+        "Failed to update member role",
+      );
+      throw new Error(errMsg);
+    }
+  }
+
+  // updateMemberStatus updates a member's status (ACTIVE / SUSPENDED).
+  public async updateMemberStatus(
+    orgId: string,
+    userId: string,
+    status: string,
+    idempotencyKey?: string,
+  ): Promise<void> {
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}/status`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": readCsrfToken(),
+          "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+        },
+        body: JSON.stringify({ status }),
+      },
+    );
+    if (!res.ok) {
+      const errMsg = await extractErrorMessage(
+        res,
+        "Failed to update member status",
+      );
+      throw new Error(errMsg);
+    }
+  }
+
+  // removeMember removes a member from an organization.
+  public async removeMember(
+    orgId: string,
+    userId: string,
+    idempotencyKey?: string,
+  ): Promise<void> {
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`,
+      {
+        method: "DELETE",
+        headers: {
+          "X-CSRF-Token": readCsrfToken(),
+          "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+        },
+      },
+    );
+    if (!res.ok) {
+      const errMsg = await extractErrorMessage(res, "Failed to remove member");
+      throw new Error(errMsg);
+    }
+  }
+
+  // listApiKeys lists all API keys for an environment.
+  public async listApiKeys(envId: string): Promise<APIKeySummary[]> {
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/environments/${encodeURIComponent(envId)}/api-keys`,
+    );
+    if (!res.ok) {
+      const errMsg = await extractErrorMessage(res, "Failed to list API keys");
+      throw new Error(errMsg);
+    }
+    const body = (await res.json()) as { api_keys?: APIKeySummary[] };
+    return body.api_keys ?? [];
+  }
+
+  // createApiKey creates a new machine API key for an environment.
+  public async createApiKey(
+    envId: string,
+    capabilities: string[],
+    expiryDays = 90,
+    idempotencyKey?: string,
+  ): Promise<GeneratedKey> {
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/environments/${encodeURIComponent(envId)}/api-keys`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": readCsrfToken(),
+          "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+        },
+        body: JSON.stringify({ capabilities, expiry_days: expiryDays }),
+      },
+    );
+    if (!res.ok) {
+      const errMsg = await extractErrorMessage(res, "Failed to create API key");
+      throw new Error(errMsg);
+    }
+    return res.json() as Promise<GeneratedKey>;
+  }
+
+  // rotateApiKey rotates an existing API key, revoking the old one and returning a new plaintext secret.
+  public async rotateApiKey(
+    keyId: string,
+    expiryDays = 90,
+    idempotencyKey?: string,
+  ): Promise<GeneratedKey> {
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/api-keys/${encodeURIComponent(keyId)}/rotate`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-CSRF-Token": readCsrfToken(),
+          "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+        },
+        body: JSON.stringify({ expiry_days: expiryDays }),
+      },
+    );
+    if (!res.ok) {
+      const errMsg = await extractErrorMessage(res, "Failed to rotate API key");
+      throw new Error(errMsg);
+    }
+    return res.json() as Promise<GeneratedKey>;
+  }
+
+  // revokeApiKey revokes an existing API key immediately.
+  public async revokeApiKey(
+    keyId: string,
+    idempotencyKey?: string,
+  ): Promise<void> {
+    const res = await apiFetch(
+      `${this.baseUrl}/v1/api-keys/${encodeURIComponent(keyId)}`,
+      {
+        method: "DELETE",
+        headers: {
+          "X-CSRF-Token": readCsrfToken(),
+          "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+        },
+      },
+    );
+    if (!res.ok) {
+      const errMsg = await extractErrorMessage(res, "Failed to revoke API key");
+      throw new Error(errMsg);
+    }
+  }
+}
+
+async function extractErrorMessage(
+  res: Response,
+  defaultPrefix: string,
+): Promise<string> {
+  try {
+    const data = (await res.json()) as { message?: string; code?: string };
+    if (data && typeof data.message === "string" && data.message.length > 0) {
+      return data.message;
+    }
+    if (data && typeof data.code === "string" && data.code.length > 0) {
+      return data.code;
+    }
+  } catch {
+    // fallback
+  }
+  return `${defaultPrefix} (HTTP ${res.status}): ${res.statusText}`;
 }

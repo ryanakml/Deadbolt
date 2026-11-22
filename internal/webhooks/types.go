@@ -18,7 +18,7 @@ const (
 
 	PayloadVersionV1 = 1
 
-	MaxAttempts   = 12
+	MaxAttempts    = 12
 	MaxDeliveryAge = 24 * time.Hour
 
 	ConnectTimeout = 3 * time.Second
@@ -35,13 +35,14 @@ const (
 )
 
 var (
-	ErrEndpointNotFound = errors.New("webhook endpoint not found")
-	ErrDeliveryNotFound = errors.New("webhook delivery not found")
-	ErrRevisionConflict = errors.New("webhook endpoint revision conflict")
-	ErrInvalidURL       = errors.New("invalid webhook URL")
-	ErrSSRFBlocked      = errors.New("destination IP or address blocked by SSRF defense")
-	ErrInvalidEvent     = errors.New("unsupported webhook event type")
+	ErrEndpointNotFound       = errors.New("webhook endpoint not found")
+	ErrDeliveryNotFound       = errors.New("webhook delivery not found")
+	ErrRevisionConflict       = errors.New("webhook endpoint revision conflict")
+	ErrInvalidURL             = errors.New("invalid webhook URL")
+	ErrSSRFBlocked            = errors.New("destination IP or address blocked by SSRF defense")
+	ErrInvalidEvent           = errors.New("unsupported webhook event type")
 	ErrInvalidSignatureHeader = errors.New("invalid signature header format")
+	ErrEndpointInactive       = errors.New("cannot redeliver to inactive webhook endpoint")
 )
 
 // ValidEventTypes returns true if event is one of the supported V1 webhook events
@@ -55,40 +56,40 @@ func IsValidEventType(evt string) bool {
 }
 
 type WebhookEndpoint struct {
-	ID                     string     `json:"id"`
-	OrganizationID         string     `json:"organizationId"`
-	EnvironmentID          string     `json:"environmentId"`
-	URL                    string     `json:"url"`
-	EncryptedSecret        string     `json:"-"`
-	SigningKeyID           string     `json:"signingKeyId"`
+	ID                      string     `json:"id"`
+	OrganizationID          string     `json:"organizationId"`
+	EnvironmentID           string     `json:"environmentId"`
+	URL                     string     `json:"url"`
+	EncryptedSecret         string     `json:"-"`
+	SigningKeyID            string     `json:"signingKeyId"`
 	PreviousEncryptedSecret *string    `json:"-"`
-	PreviousSigningKeyID   *string    `json:"previousSigningKeyId,omitempty"`
-	RotatedAt              *time.Time `json:"rotatedAt,omitempty"`
-	SubscribedEvents       []string   `json:"subscribedEvents"`
-	Active                 bool       `json:"active"`
-	Revision               int64      `json:"revision"`
-	CreatedAt              time.Time  `json:"createdAt"`
-	UpdatedAt              time.Time  `json:"updatedAt"`
+	PreviousSigningKeyID    *string    `json:"previousSigningKeyId,omitempty"`
+	RotatedAt               *time.Time `json:"rotatedAt,omitempty"`
+	SubscribedEvents        []string   `json:"subscribedEvents"`
+	Active                  bool       `json:"active"`
+	Revision                int64      `json:"revision"`
+	CreatedAt               time.Time  `json:"createdAt"`
+	UpdatedAt               time.Time  `json:"updatedAt"`
 }
 
 type WebhookDelivery struct {
-	ID               string     `json:"id"`
-	OrganizationID   string     `json:"organizationId"`
-	EndpointID       string     `json:"endpointId"`
-	EndpointRevision int64      `json:"endpointRevision"`
-	EventID          string     `json:"eventId"`
-	EventType        string     `json:"eventType"`
-	RunID            *string    `json:"runId,omitempty"`
+	ID               string         `json:"id"`
+	OrganizationID   string         `json:"organizationId"`
+	EndpointID       string         `json:"endpointId"`
+	EndpointRevision int64          `json:"endpointRevision"`
+	EventID          string         `json:"eventId"`
+	EventType        string         `json:"eventType"`
+	RunID            *string        `json:"runId,omitempty"`
 	Payload          map[string]any `json:"payload"`
-	Attempts         int        `json:"attempts"`
-	Status           string     `json:"status"`
-	NextAt           time.Time  `json:"nextAt"`
-	DeliveredAt      *time.Time `json:"deliveredAt,omitempty"`
-	LastStatusCode   *int       `json:"lastStatusCode,omitempty"`
-	LastError        *string    `json:"lastError,omitempty"`
-	ResponseSnippet  *string    `json:"responseSnippet,omitempty"`
-	CreatedAt        time.Time  `json:"createdAt"`
-	CompletedAt      *time.Time `json:"completedAt,omitempty"`
+	Attempts         int            `json:"attempts"`
+	Status           string         `json:"status"`
+	NextAt           time.Time      `json:"nextAt"`
+	DeliveredAt      *time.Time     `json:"deliveredAt,omitempty"`
+	LastStatusCode   *int           `json:"lastStatusCode,omitempty"`
+	LastError        *string        `json:"lastError,omitempty"`
+	ResponseSnippet  *string        `json:"responseSnippet,omitempty"`
+	CreatedAt        time.Time      `json:"createdAt"`
+	CompletedAt      *time.Time     `json:"completedAt,omitempty"`
 }
 
 type EventPayload struct {

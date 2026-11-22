@@ -6,7 +6,7 @@ export * from "./permissions.js";
 import { DashboardApiClient, isUnauthorized, isConflict, newIdempotencyKey, } from "./api.js";
 import { createEnvironmentSelection, formatEnvironmentLabel, getSelectedEnvironmentId, selectEnvironment, setSelectionCatalog, setSelectionOrganization, } from "./api.js";
 import { resolveOrgState } from "./auth.js";
-import { sessionCanControlRuns, sessionCanDecideApprovals, sessionCanDrainWorkers, sessionCanManageSchedules, sessionCanManageWebhooks, visibleRunControls, visibleRerunControl, } from "./permissions.js";
+import { sessionCanControlRuns, sessionCanDecideApprovals, sessionCanDrainWorkers, sessionCanManageSchedules, sessionCanManageWebhooks, sessionCanManageMembers, sessionCanManageKeys, sessionCanReadPayload, visibleRunControls, visibleRerunControl, } from "./permissions.js";
 import { RunInspector } from "./inspector.js";
 import { shouldShowWorkerWait, terminalStepEmptyText, openCaseForStep, reconciliationHoldText, terminationBannerText, RESOLVE_ACTIONS, getStatusPresentation, computeGraphLayout, computeMinimap, filterEventsForStep, virtualizeItems, getBoundedEvents, } from "./inspector.js";
 import { clearStreamErrorOnLive, createStreamErrorBanner, markGlobalError, markStreamError, } from "./stream.js";
@@ -37,6 +37,10 @@ function initDashboard() {
     let canManageSchedules = false;
     let canDrainWorkers = false;
     let canManageWebhooks = false;
+    let canManageMembers = false;
+    let canManageKeys = false;
+    let canReadPayload = false;
+    let currentSession = null;
     // Active view id so the environment selector can refresh the schedules
     // list only when the schedules view is showing. Unconditional refreshes
     // would issue protected requests the current view never asked for.
@@ -64,6 +68,7 @@ function initDashboard() {
     const schedulesNavBtn = document.getElementById("nav-schedules");
     const deploymentsNavBtn = document.getElementById("nav-deployments");
     const webhooksNavBtn = document.getElementById("nav-webhooks");
+    const settingsNavBtn = document.getElementById("nav-settings");
     if (envSelect) {
         envSelect.addEventListener("change", () => {
             selectEnvironment(envSelection, envSelect.value || null);
@@ -79,6 +84,9 @@ function initDashboard() {
             }
             else if (activeViewId === "webhooks-view") {
                 loadWebhooksList(api, getSelectedEnvironmentId(envSelection));
+            }
+            else if (activeViewId === "settings-view") {
+                loadApiKeysList(api, getSelectedEnvironmentId(envSelection));
             }
         });
     }
@@ -124,6 +132,32 @@ function initDashboard() {
         webhooksNavBtn.addEventListener("click", () => {
             showView("webhooks-view");
             loadWebhooksList(api, getSelectedEnvironmentId(envSelection));
+        });
+    }
+    if (settingsNavBtn) {
+        settingsNavBtn.addEventListener("click", () => {
+            showView("settings-view");
+            const orgId = currentSession?.active_organization_id ?? null;
+            loadMembersList(api, orgId);
+            loadApiKeysList(api, getSelectedEnvironmentId(envSelection));
+        });
+    }
+    const membersAddBtn = document.getElementById("members-add-btn");
+    if (membersAddBtn) {
+        membersAddBtn.addEventListener("click", () => {
+            const orgId = currentSession?.active_organization_id;
+            if (!orgId)
+                return;
+            openAddMemberDialog(api, orgId);
+        });
+    }
+    const keysNewBtn = document.getElementById("keys-new-btn");
+    if (keysNewBtn) {
+        keysNewBtn.addEventListener("click", () => {
+            const envId = getSelectedEnvironmentId(envSelection);
+            if (!envId)
+                return;
+            openCreateApiKeyDialog(api, envId);
         });
     }
     const schedulesNewBtn = document.getElementById("schedules-new-btn");
@@ -200,6 +234,7 @@ function initDashboard() {
         }
     }
     async function enterApp(session) {
+        currentSession = session;
         hideAuthView();
         const label = document.getElementById("session-label");
         if (label) {
@@ -222,6 +257,9 @@ function initDashboard() {
         canManageSchedules = sessionCanManageSchedules(session, orgId);
         canDrainWorkers = sessionCanDrainWorkers(session, orgId);
         canManageWebhooks = sessionCanManageWebhooks(session, orgId);
+        canManageMembers = sessionCanManageMembers(session, orgId);
+        canManageKeys = sessionCanManageKeys(session, orgId);
+        canReadPayload = sessionCanReadPayload(session, orgId);
         await loadEnvironmentCatalog(orgId);
         if (runIdParam) {
             inspectRun(runIdParam);
@@ -394,9 +432,19 @@ function initDashboard() {
         canDecideApprovals = false;
         canManageSchedules = false;
         canDrainWorkers = false;
+        canManageWebhooks = false;
+        canManageMembers = false;
+        canManageKeys = false;
+        canReadPayload = false;
+        currentSession = null;
         activeViewId = "runs-view";
         clearEnvironmentState();
-        for (const id of ["runs-table-body", "workers-table-body"]) {
+        for (const id of [
+            "runs-table-body",
+            "workers-table-body",
+            "members-table-body",
+            "keys-table-body",
+        ]) {
             const el = document.getElementById(id);
             if (el)
                 el.innerHTML = "";
@@ -428,6 +476,25 @@ function initDashboard() {
         const target = document.getElementById(viewId);
         if (target) {
             target.classList.remove("hidden");
+        }
+        const navButtons = [
+            { id: "nav-runs", view: "runs-view" },
+            { id: "nav-workers", view: "workers-view" },
+            { id: "nav-schedules", view: "schedules-view" },
+            { id: "nav-deployments", view: "deployments-view" },
+            { id: "nav-webhooks", view: "webhooks-view" },
+            { id: "nav-settings", view: "settings-view" },
+        ];
+        for (const nb of navButtons) {
+            const el = document.getElementById(nb.id);
+            if (el) {
+                if (nb.view === viewId) {
+                    el.classList.add("active");
+                }
+                else {
+                    el.classList.remove("active");
+                }
+            }
         }
     }
     async function loadRunsList(client, envId) {
@@ -1437,12 +1504,12 @@ function initDashboard() {
         if (!tbody)
             return;
         tbody.innerHTML =
-            '<tr><td colspan="7" class="loading">Loading deliveries...</td></tr>';
+            '<tr><td colspan="9" class="loading">Loading deliveries...</td></tr>';
         try {
             const resp = await client.listWebhookDeliveries(endpointId);
             if (resp.items.length === 0) {
                 tbody.innerHTML =
-                    '<tr><td colspan="7" class="empty-state">No deliveries found for this endpoint.</td></tr>';
+                    '<tr><td colspan="9" class="empty-state">No deliveries found for this endpoint.</td></tr>';
                 return;
             }
             tbody.innerHTML = "";
@@ -1453,12 +1520,16 @@ function initDashboard() {
                     (d.status === "FAILED" || d.status === "CANCELLED")
                     ? `<button class="secondary-btn delivery-redeliver-btn" data-delivery-id="${escapeHtml(d.id)}">Redeliver</button>`
                     : "";
+                const responseSnippet = escapeHtml(d.responseSnippet || d.lastError || "-");
+                const nextRetry = d.nextAt ? new Date(d.nextAt).toLocaleString() : "-";
                 row.innerHTML = `
           <td><code>${escapeHtml(d.id)}</code></td>
           <td>${escapeHtml(d.eventType)}</td>
           <td>${statusBadge}</td>
           <td>${d.attempts}</td>
           <td>${d.lastStatusCode ? `HTTP ${d.lastStatusCode}` : escapeHtml(d.lastError || "-")}</td>
+          <td><code class="snippet-tag">${responseSnippet}</code></td>
+          <td>${nextRetry}</td>
           <td>${new Date(d.createdAt).toLocaleString()}</td>
           <td>${redeliverBtn}</td>
         `;
@@ -1469,14 +1540,11 @@ function initDashboard() {
                     const deliveryId = btn.getAttribute("data-delivery-id");
                     if (!deliveryId)
                         return;
-                    btn.disabled = true;
-                    client
-                        .redeliverWebhook(deliveryId)
-                        .then(() => loadDeliveriesList(client, endpointId))
-                        .catch((err) => {
-                        btn.disabled = false;
-                        renderError(new Error(err instanceof Error ? err.message : String(err)));
-                    });
+                    const delivery = resp.items.find((x) => x.id === deliveryId);
+                    if (!delivery)
+                        return;
+                    const envId = getSelectedEnvironmentId(envSelection) || "";
+                    openRedeliverDialog(client, delivery, endpointId, envId);
                 });
             });
         }
@@ -1485,8 +1553,520 @@ function initDashboard() {
                 handleUnauthorized();
                 return;
             }
-            tbody.innerHTML = `<tr><td colspan="7" class="error-state">Failed to load deliveries: ${escapeHtml(err instanceof Error ? err.message : String(err))}</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="9" class="error-state">Failed to load deliveries: ${escapeHtml(err instanceof Error ? err.message : String(err))}</td></tr>`;
         }
+    }
+    function openRedeliverDialog(client, delivery, currentEndpointId, envId) {
+        document.getElementById("redeliver-dialog-overlay")?.remove();
+        const overlay = document.createElement("div");
+        overlay.className = "dialog-overlay";
+        overlay.id = "redeliver-dialog-overlay";
+        overlay.innerHTML = `
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="redeliver-dialog-title">
+        <h3 id="redeliver-dialog-title">Redeliver Webhook</h3>
+        <p class="text-muted">Re-dispatch delivery <code>${escapeHtml(delivery.id)}</code> (Preserved Event ID: <code>${escapeHtml(delivery.eventId)}</code>).</p>
+        <div style="margin: 1rem 0;">
+          <label style="display:block; margin-bottom: 0.5rem; cursor: pointer;">
+            <input type="radio" name="redeliver-dest" id="redeliver-dest-same" value="same" checked />
+            Original Endpoint (<code>${escapeHtml(currentEndpointId)}</code>)
+          </label>
+          <label style="display:block; margin-bottom: 0.5rem; cursor: pointer;">
+            <input type="radio" name="redeliver-dest" id="redeliver-dest-new" value="new" />
+            Explicit Destination Endpoint:
+          </label>
+          <select id="redeliver-dest-select" style="width: 100%; margin-top: 0.25rem;" disabled>
+            <option value="">Loading endpoints...</option>
+          </select>
+        </div>
+        <div id="redeliver-dialog-error" class="dialog-error" role="alert" style="display:none; color: var(--color-danger, #e53e3e); margin-bottom: 1rem;"></div>
+        <div class="dialog-actions">
+          <button id="redeliver-dialog-dismiss" class="secondary-btn" type="button">Cancel</button>
+          <button id="redeliver-dialog-submit" class="primary-btn" type="button">Confirm Redeliver</button>
+        </div>
+      </div>
+    `;
+        document.body.appendChild(overlay);
+        const sameRadio = overlay.querySelector("#redeliver-dest-same");
+        const newRadio = overlay.querySelector("#redeliver-dest-new");
+        const destSelect = overlay.querySelector("#redeliver-dest-select");
+        const errorBox = overlay.querySelector("#redeliver-dialog-error");
+        const dismissBtn = overlay.querySelector("#redeliver-dialog-dismiss");
+        const submitBtn = overlay.querySelector("#redeliver-dialog-submit");
+        sameRadio.addEventListener("change", () => {
+            destSelect.disabled = true;
+        });
+        newRadio.addEventListener("change", () => {
+            destSelect.disabled = false;
+        });
+        if (envId) {
+            client
+                .listWebhookEndpoints(envId)
+                .then((res) => {
+                destSelect.innerHTML = "";
+                if (res.items.length === 0) {
+                    const opt = document.createElement("option");
+                    opt.value = "";
+                    opt.textContent = "No endpoints found in this environment";
+                    destSelect.appendChild(opt);
+                    return;
+                }
+                for (const ep of res.items) {
+                    const opt = document.createElement("option");
+                    opt.value = ep.id;
+                    opt.textContent = `${ep.url} (${ep.enabled ? "Active" : "Disabled"}) - ${ep.id}`;
+                    destSelect.appendChild(opt);
+                }
+            })
+                .catch((err) => {
+                destSelect.innerHTML = `<option value="">Failed to load endpoints: ${escapeHtml(err instanceof Error ? err.message : String(err))}</option>`;
+            });
+        }
+        dismissBtn.addEventListener("click", () => overlay.remove());
+        submitBtn.addEventListener("click", async () => {
+            errorBox.style.display = "none";
+            errorBox.textContent = "";
+            submitBtn.disabled = true;
+            const destinationEndpointId = newRadio.checked
+                ? destSelect.value
+                : undefined;
+            if (newRadio.checked && !destinationEndpointId) {
+                errorBox.textContent = "Please select a destination endpoint.";
+                errorBox.style.display = "block";
+                submitBtn.disabled = false;
+                return;
+            }
+            try {
+                await client.redeliverWebhook(delivery.id, destinationEndpointId);
+                overlay.remove();
+                await loadDeliveriesList(client, currentEndpointId);
+            }
+            catch (err) {
+                submitBtn.disabled = false;
+                const msg = err instanceof Error ? err.message : String(err);
+                errorBox.textContent = `Redelivery failed: ${msg}`;
+                errorBox.style.display = "block";
+            }
+        });
+    }
+    async function loadMembersList(client, orgId) {
+        const listContainer = document.getElementById("members-table-body");
+        const addBtn = document.getElementById("members-add-btn");
+        const errorAlert = document.getElementById("settings-error-alert");
+        if (!listContainer)
+            return;
+        if (addBtn) {
+            if (canManageMembers)
+                addBtn.classList.remove("hidden");
+            else
+                addBtn.classList.add("hidden");
+        }
+        if (!orgId) {
+            listContainer.innerHTML =
+                '<tr><td colspan="5" class="empty-state">No organization context available.</td></tr>';
+            return;
+        }
+        listContainer.innerHTML =
+            '<tr><td colspan="5" class="loading">Loading members...</td></tr>';
+        try {
+            const members = await client.listMembers(orgId);
+            if (members.length === 0) {
+                listContainer.innerHTML =
+                    '<tr><td colspan="5" class="empty-state">No members found.</td></tr>';
+                return;
+            }
+            listContainer.innerHTML = "";
+            for (const m of members) {
+                const row = document.createElement("tr");
+                let actionsHtml = '<span class="text-muted">-</span>';
+                if (canManageMembers) {
+                    const statusActionText = m.status === "ACTIVE" ? "Suspend" : "Activate";
+                    actionsHtml = `
+            <button class="secondary-btn btn-sm member-role-btn" data-user-id="${escapeHtml(m.userId)}" data-current-role="${escapeHtml(m.role)}">Change Role</button>
+            <button class="secondary-btn btn-sm member-status-btn" data-user-id="${escapeHtml(m.userId)}" data-current-status="${escapeHtml(m.status)}">${statusActionText}</button>
+            <button class="danger-btn btn-sm member-remove-btn" data-user-id="${escapeHtml(m.userId)}">Remove</button>
+          `;
+                }
+                row.innerHTML = `
+          <td><code>${escapeHtml(m.userId)}</code></td>
+          <td><span class="badge role-${m.role.toLowerCase()}">${escapeHtml(m.role)}</span></td>
+          <td><span class="badge status-${m.status.toLowerCase()}">${escapeHtml(m.status)}</span></td>
+          <td>${new Date(m.createdAt).toLocaleString()}</td>
+          <td>${actionsHtml}</td>
+        `;
+                row
+                    .querySelector(".member-role-btn")
+                    ?.addEventListener("click", async (e) => {
+                    const btn = e.currentTarget;
+                    const uId = btn.getAttribute("data-user-id");
+                    const curRole = btn.getAttribute("data-current-role") || "viewer";
+                    if (!uId)
+                        return;
+                    const newRole = prompt(`Enter new role for user ${uId} (owner, admin, operator, developer, viewer):`, curRole);
+                    if (!newRole || newRole.toLowerCase() === curRole.toLowerCase())
+                        return;
+                    btn.disabled = true;
+                    try {
+                        if (errorAlert)
+                            errorAlert.classList.add("hidden");
+                        await client.updateMemberRole(orgId, uId, newRole.toLowerCase());
+                        await loadMembersList(client, orgId);
+                    }
+                    catch (err) {
+                        btn.disabled = false;
+                        const msg = err instanceof Error ? err.message : String(err);
+                        if (errorAlert) {
+                            errorAlert.textContent = `Failed to update member role: ${msg}`;
+                            errorAlert.classList.remove("hidden");
+                        }
+                        alert(`Failed to update member role: ${msg}`);
+                    }
+                });
+                row
+                    .querySelector(".member-status-btn")
+                    ?.addEventListener("click", async (e) => {
+                    const btn = e.currentTarget;
+                    const uId = btn.getAttribute("data-user-id");
+                    const curStatus = btn.getAttribute("data-current-status") || "ACTIVE";
+                    if (!uId)
+                        return;
+                    const targetStatus = curStatus === "ACTIVE" ? "SUSPENDED" : "ACTIVE";
+                    if (!confirm(`Are you sure you want to change user ${uId} status to ${targetStatus}?`)) {
+                        return;
+                    }
+                    btn.disabled = true;
+                    try {
+                        if (errorAlert)
+                            errorAlert.classList.add("hidden");
+                        await client.updateMemberStatus(orgId, uId, targetStatus);
+                        await loadMembersList(client, orgId);
+                    }
+                    catch (err) {
+                        btn.disabled = false;
+                        const msg = err instanceof Error ? err.message : String(err);
+                        if (errorAlert) {
+                            errorAlert.textContent = `Failed to update member status: ${msg}`;
+                            errorAlert.classList.remove("hidden");
+                        }
+                        alert(`Failed to update member status: ${msg}`);
+                    }
+                });
+                row
+                    .querySelector(".member-remove-btn")
+                    ?.addEventListener("click", async (e) => {
+                    const btn = e.currentTarget;
+                    const uId = btn.getAttribute("data-user-id");
+                    if (!uId)
+                        return;
+                    if (!confirm(`Are you sure you want to remove user ${uId} from this organization?`)) {
+                        return;
+                    }
+                    btn.disabled = true;
+                    try {
+                        if (errorAlert)
+                            errorAlert.classList.add("hidden");
+                        await client.removeMember(orgId, uId);
+                        await loadMembersList(client, orgId);
+                    }
+                    catch (err) {
+                        btn.disabled = false;
+                        const msg = err instanceof Error ? err.message : String(err);
+                        if (errorAlert) {
+                            errorAlert.textContent = `Failed to remove member: ${msg}`;
+                            errorAlert.classList.remove("hidden");
+                        }
+                        alert(`Failed to remove member: ${msg}`);
+                    }
+                });
+                listContainer.appendChild(row);
+            }
+        }
+        catch (err) {
+            if (isUnauthorized(err)) {
+                handleUnauthorized();
+                return;
+            }
+            listContainer.innerHTML = `<tr><td colspan="5" class="error-state">Failed to load members: ${escapeHtml(err instanceof Error ? err.message : String(err))}</td></tr>`;
+        }
+    }
+    function openAddMemberDialog(client, orgId) {
+        document.getElementById("member-add-dialog-overlay")?.remove();
+        const overlay = document.createElement("div");
+        overlay.className = "dialog-overlay";
+        overlay.id = "member-add-dialog-overlay";
+        overlay.innerHTML = `
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="member-add-dialog-title">
+        <h3 id="member-add-dialog-title">Add Organization Member</h3>
+        <p class="text-muted">Grant tenant access and capabilities by assigning a canonical role.</p>
+        <label>User UUID
+          <input id="member-add-userid" type="text" placeholder="e.g. 123e4567-e89b-12d3-a456-426614174000" autocomplete="off" />
+        </label>
+        <label>Role
+          <select id="member-add-role">
+            <option value="viewer">Viewer (Read-only, no payload/logs/artifacts)</option>
+            <option value="developer">Developer (Runs, deployments, payloads)</option>
+            <option value="operator">Operator (Approvals, reconcile, drain, schedules, webhooks)</option>
+            <option value="admin">Admin (Member management, API keys, environments)</option>
+            <option value="owner">Owner (Full tenant admin, last-owner protected)</option>
+          </select>
+        </label>
+        <div id="member-add-error" class="dialog-error" role="alert" style="display:none; color: var(--color-danger, #e53e3e); margin-bottom: 1rem;"></div>
+        <div class="dialog-actions">
+          <button id="member-add-dismiss" class="secondary-btn" type="button">Cancel</button>
+          <button id="member-add-submit" class="primary-btn" type="button">Add Member</button>
+        </div>
+      </div>
+    `;
+        document.body.appendChild(overlay);
+        const userIdInput = overlay.querySelector("#member-add-userid");
+        const roleSelect = overlay.querySelector("#member-add-role");
+        const errorBox = overlay.querySelector("#member-add-error");
+        const dismissBtn = overlay.querySelector("#member-add-dismiss");
+        const submitBtn = overlay.querySelector("#member-add-submit");
+        dismissBtn.addEventListener("click", () => overlay.remove());
+        submitBtn.addEventListener("click", async () => {
+            errorBox.style.display = "none";
+            errorBox.textContent = "";
+            const userId = userIdInput.value.trim();
+            const role = roleSelect.value;
+            if (!userId) {
+                errorBox.textContent = "User UUID is required.";
+                errorBox.style.display = "block";
+                return;
+            }
+            submitBtn.disabled = true;
+            try {
+                await client.addMember(orgId, userId, role);
+                overlay.remove();
+                await loadMembersList(client, orgId);
+            }
+            catch (err) {
+                submitBtn.disabled = false;
+                errorBox.textContent = err instanceof Error ? err.message : String(err);
+                errorBox.style.display = "block";
+            }
+        });
+    }
+    async function loadApiKeysList(client, envId) {
+        const listContainer = document.getElementById("keys-table-body");
+        const newBtn = document.getElementById("keys-new-btn");
+        const secretAlert = document.getElementById("settings-secret-alert");
+        if (!listContainer)
+            return;
+        if (newBtn) {
+            if (canManageKeys)
+                newBtn.classList.remove("hidden");
+            else
+                newBtn.classList.add("hidden");
+        }
+        if (!envId) {
+            listContainer.innerHTML =
+                '<tr><td colspan="7" class="empty-state">Select an environment to view API keys.</td></tr>';
+            return;
+        }
+        listContainer.innerHTML =
+            '<tr><td colspan="7" class="loading">Loading API keys...</td></tr>';
+        try {
+            const keys = await client.listApiKeys(envId);
+            if (keys.length === 0) {
+                listContainer.innerHTML =
+                    '<tr><td colspan="7" class="empty-state">No API keys issued for this environment.</td></tr>';
+                return;
+            }
+            listContainer.innerHTML = "";
+            for (const k of keys) {
+                const row = document.createElement("tr");
+                const isRevoked = Boolean(k.revokedAt);
+                const isExpired = k.expiresAt
+                    ? new Date(k.expiresAt).getTime() < Date.now()
+                    : false;
+                const status = isRevoked ? "REVOKED" : isExpired ? "EXPIRED" : "ACTIVE";
+                const statusBadge = `<span class="badge status-${status.toLowerCase()}">${status}</span>`;
+                const capsTags = k.capabilities
+                    .map((c) => `<code class="capability-tag">${escapeHtml(c)}</code>`)
+                    .join(" ");
+                let actionsHtml = '<span class="text-muted">-</span>';
+                if (canManageKeys && status === "ACTIVE") {
+                    actionsHtml = `
+            <button class="secondary-btn btn-sm key-rotate-btn" data-key-id="${escapeHtml(k.id)}" data-key-prefix="${escapeHtml(k.prefix)}">Rotate</button>
+            <button class="danger-btn btn-sm key-revoke-btn" data-key-id="${escapeHtml(k.id)}" data-key-prefix="${escapeHtml(k.prefix)}">Revoke</button>
+          `;
+                }
+                row.innerHTML = `
+          <td><code>${escapeHtml(k.prefix)}</code></td>
+          <td>${escapeHtml(k.environmentName || envId)}</td>
+          <td>${capsTags || '<span class="text-muted">(none)</span>'}</td>
+          <td>${k.expiresAt ? new Date(k.expiresAt).toLocaleDateString() : "Never"}</td>
+          <td>${statusBadge}</td>
+          <td>${new Date(k.createdAt).toLocaleString()}</td>
+          <td>${actionsHtml}</td>
+        `;
+                row
+                    .querySelector(".key-rotate-btn")
+                    ?.addEventListener("click", async (e) => {
+                    const btn = e.currentTarget;
+                    const kId = btn.getAttribute("data-key-id");
+                    const kPrefix = btn.getAttribute("data-key-prefix");
+                    if (!kId)
+                        return;
+                    if (!confirm(`Rotate key ${kPrefix}? The previous key will be revoked immediately and a new secret key will be issued.`)) {
+                        return;
+                    }
+                    btn.disabled = true;
+                    try {
+                        const rotated = await client.rotateApiKey(kId);
+                        if (secretAlert) {
+                            secretAlert.innerHTML = `
+                <div class="secret-box">
+                  <strong>API Key Rotated!</strong>
+                  <p>Secret token: <code id="secret-token-val">${escapeHtml(rotated.key || "")}</code></p>
+                  <p class="text-muted" style="margin-top:0.25rem;">⚠️ Save this secret now. It will NEVER be displayed again.</p>
+                  <button id="copy-secret-btn" class="secondary-btn btn-sm" type="button">Copy Key</button>
+                </div>
+              `;
+                            secretAlert.classList.remove("hidden");
+                            secretAlert
+                                .querySelector("#copy-secret-btn")
+                                ?.addEventListener("click", () => {
+                                if (rotated.key &&
+                                    typeof navigator !== "undefined" &&
+                                    navigator.clipboard) {
+                                    navigator.clipboard
+                                        .writeText(rotated.key)
+                                        .then(() => alert("Copied to clipboard!"));
+                                }
+                            });
+                        }
+                        await loadApiKeysList(client, envId);
+                    }
+                    catch (err) {
+                        btn.disabled = false;
+                        alert(`Failed to rotate API key: ${err instanceof Error ? err.message : String(err)}`);
+                    }
+                });
+                row
+                    .querySelector(".key-revoke-btn")
+                    ?.addEventListener("click", async (e) => {
+                    const btn = e.currentTarget;
+                    const kId = btn.getAttribute("data-key-id");
+                    const kPrefix = btn.getAttribute("data-key-prefix");
+                    if (!kId)
+                        return;
+                    if (!confirm(`Revoke key ${kPrefix}? Any subsequent operations using this key will immediately be blocked.`)) {
+                        return;
+                    }
+                    btn.disabled = true;
+                    try {
+                        await client.revokeApiKey(kId);
+                        await loadApiKeysList(client, envId);
+                    }
+                    catch (err) {
+                        btn.disabled = false;
+                        alert(`Failed to revoke API key: ${err instanceof Error ? err.message : String(err)}`);
+                    }
+                });
+                listContainer.appendChild(row);
+            }
+        }
+        catch (err) {
+            if (isUnauthorized(err)) {
+                handleUnauthorized();
+                return;
+            }
+            listContainer.innerHTML = `<tr><td colspan="7" class="error-state">Failed to load API keys: ${escapeHtml(err instanceof Error ? err.message : String(err))}</td></tr>`;
+        }
+    }
+    function openCreateApiKeyDialog(client, envId) {
+        document.getElementById("key-create-dialog-overlay")?.remove();
+        const overlay = document.createElement("div");
+        overlay.className = "dialog-overlay";
+        overlay.id = "key-create-dialog-overlay";
+        overlay.innerHTML = `
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="key-create-dialog-title">
+        <h3 id="key-create-dialog-title">Create Environment API Key</h3>
+        <p class="text-muted">Issue a scoped machine identity. Plaintext secret is shown strictly once.</p>
+        <label>Expiration (Days, default: 90)
+          <input id="key-create-expiry" type="number" value="90" min="1" max="365" />
+        </label>
+        <fieldset style="border: 1px solid var(--border-color, #ccc); padding: 0.75rem; border-radius: 4px; margin: 1rem 0;">
+          <legend style="font-weight: 600; padding: 0 0.5rem;">Granted Capabilities</legend>
+          <p class="text-muted" style="margin-top: 0; font-size: 0.85rem;">
+            Note: Machine keys cannot decide approvals or trigger reconciliations (Blueprint §24.2).
+          </p>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+            <label><input type="checkbox" class="key-cap-chk" value="runs:read" checked /> runs:read</label>
+            <label><input type="checkbox" class="key-cap-chk" value="runs:create" checked /> runs:create</label>
+            <label><input type="checkbox" class="key-cap-chk" value="runs:control" checked /> runs:control</label>
+            <label><input type="checkbox" class="key-cap-chk" value="payload:read" checked /> payload:read</label>
+            <label><input type="checkbox" class="key-cap-chk" value="deployments:register" /> deployments:register</label>
+            <label><input type="checkbox" class="key-cap-chk" value="deployments:activate:staging" /> deployments:activate:staging</label>
+            <label><input type="checkbox" class="key-cap-chk" value="deployments:activate:production" /> deployments:activate:production</label>
+            <label><input type="checkbox" class="key-cap-chk" value="workers:read" checked /> workers:read</label>
+            <label><input type="checkbox" class="key-cap-chk" value="workers:drain" /> workers:drain</label>
+            <label><input type="checkbox" class="key-cap-chk" value="schedules:write" /> schedules:write</label>
+            <label><input type="checkbox" class="key-cap-chk" value="webhooks:write" /> webhooks:write</label>
+          </div>
+        </fieldset>
+        <div id="key-create-error" class="dialog-error" role="alert" style="display:none; color: var(--color-danger, #e53e3e); margin-bottom: 1rem;"></div>
+        <div class="dialog-actions">
+          <button id="key-create-dismiss" class="secondary-btn" type="button">Cancel</button>
+          <button id="key-create-submit" class="primary-btn" type="button">Generate Key</button>
+        </div>
+      </div>
+    `;
+        document.body.appendChild(overlay);
+        const expiryInput = overlay.querySelector("#key-create-expiry");
+        const errorBox = overlay.querySelector("#key-create-error");
+        const dismissBtn = overlay.querySelector("#key-create-dismiss");
+        const submitBtn = overlay.querySelector("#key-create-submit");
+        const secretAlert = document.getElementById("settings-secret-alert");
+        dismissBtn.addEventListener("click", () => overlay.remove());
+        submitBtn.addEventListener("click", async () => {
+            errorBox.style.display = "none";
+            errorBox.textContent = "";
+            const days = parseInt(expiryInput.value, 10) || 90;
+            const checkedBoxes = overlay.querySelectorAll(".key-cap-chk:checked");
+            const capabilities = [];
+            checkedBoxes.forEach((cb) => capabilities.push(cb.value));
+            if (capabilities.length === 0) {
+                errorBox.textContent =
+                    "Select at least one capability for the API key.";
+                errorBox.style.display = "block";
+                return;
+            }
+            submitBtn.disabled = true;
+            try {
+                const created = await client.createApiKey(envId, capabilities, days);
+                overlay.remove();
+                if (secretAlert) {
+                    secretAlert.innerHTML = `
+            <div class="secret-box">
+              <strong>New API Key Created!</strong>
+              <p>Secret token: <code id="secret-token-val">${escapeHtml(created.key || "")}</code></p>
+              <p class="text-muted" style="margin-top:0.25rem;">⚠️ Save this secret now. It will NEVER be displayed again.</p>
+              <button id="copy-secret-btn" class="secondary-btn btn-sm" type="button">Copy Key</button>
+            </div>
+          `;
+                    secretAlert.classList.remove("hidden");
+                    secretAlert
+                        .querySelector("#copy-secret-btn")
+                        ?.addEventListener("click", () => {
+                        if (created.key &&
+                            typeof navigator !== "undefined" &&
+                            navigator.clipboard) {
+                            navigator.clipboard
+                                .writeText(created.key)
+                                .then(() => alert("Copied to clipboard!"));
+                        }
+                    });
+                }
+                await loadApiKeysList(client, envId);
+            }
+            catch (err) {
+                submitBtn.disabled = false;
+                errorBox.textContent = err instanceof Error ? err.message : String(err);
+                errorBox.style.display = "block";
+            }
+        });
     }
     function openWebhookCreateDialog(client, envId, invoker) {
         document.getElementById("webhook-create-dialog-overlay")?.remove();
@@ -1949,6 +2529,9 @@ function initDashboard() {
                 else if (stepLogs?.expired) {
                     logsContent = `<div class="logs-notice logs-expired">Logs have expired due to the 7-day retention policy.</div>`;
                 }
+                else if (!canReadPayload) {
+                    logsContent = `<div class="text-muted">Viewing step task logs requires <code>payload:read</code> capability.</div>`;
+                }
                 else {
                     logsContent = `<div class="text-muted">No logs recorded for this step yet (or click Logs to load).</div>`;
                 }
@@ -2286,11 +2869,21 @@ function initDashboard() {
                     if (t === "logs" &&
                         selectedStep &&
                         !cachedStepLogs.has(selectedStep.id)) {
-                        activeInspector?.fetchLogs(selectedStep.id).then((l) => {
-                            if (l)
-                                cachedStepLogs.set(selectedStep.id, l);
+                        if (!canReadPayload) {
+                            cachedStepLogs.set(selectedStep.id, {
+                                items: [],
+                                nextCursor: undefined,
+                                expired: false,
+                            });
                             renderSnapshot(lastSnap);
-                        });
+                        }
+                        else {
+                            activeInspector?.fetchLogs(selectedStep.id).then((l) => {
+                                if (l)
+                                    cachedStepLogs.set(selectedStep.id, l);
+                                renderSnapshot(lastSnap);
+                            });
+                        }
                     }
                     renderSnapshot(lastSnap);
                 };

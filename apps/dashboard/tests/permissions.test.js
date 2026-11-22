@@ -6,8 +6,17 @@ import {
   visibleRunControls,
   roleCanDecideApprovals,
   sessionCanDecideApprovals,
+  roleCanManageMembers,
+  sessionCanManageMembers,
+  roleCanManageKeys,
+  sessionCanManageKeys,
+  roleCanReadPayload,
+  sessionCanReadPayload,
   APPROVALS_DECIDE_CAPABILITY,
   RUNS_CONTROL_CAPABILITY,
+  ADMIN_MEMBER_CAPABILITY,
+  ADMIN_KEY_CAPABILITY,
+  PAYLOAD_READ_CAPABILITY,
 } from "../dist/permissions.js";
 
 function sessionWithRole(role, status = "ACTIVE", orgId = "org-1") {
@@ -187,5 +196,95 @@ describe("approval decision permissions", () => {
       sessionCanDecideApprovals(sessionWithRole("owner"), null),
       false,
     );
+  });
+});
+
+describe("admin:member and admin:key permission gating (Blueprint §24.1, §24.2)", () => {
+  test("only admin and owner may manage members and keys", () => {
+    assert.equal(ADMIN_MEMBER_CAPABILITY, "admin:member");
+    assert.equal(ADMIN_KEY_CAPABILITY, "admin:key");
+
+    for (const role of ["admin", "owner", "Admin", "OWNER"]) {
+      assert.equal(roleCanManageMembers(role), true, role);
+      assert.equal(roleCanManageKeys(role), true, role);
+    }
+    for (const role of [
+      "viewer",
+      "developer",
+      "operator",
+      "",
+      null,
+      undefined,
+    ]) {
+      assert.equal(roleCanManageMembers(role), false, String(role));
+      assert.equal(roleCanManageKeys(role), false, String(role));
+    }
+  });
+
+  test("sessionCanManageMembers and sessionCanManageKeys check active org and status", () => {
+    const adminSess = sessionWithRole("admin");
+    const devSess = sessionWithRole("developer");
+    const viewerSess = sessionWithRole("viewer");
+
+    assert.equal(sessionCanManageMembers(adminSess, "org-1"), true);
+    assert.equal(sessionCanManageKeys(adminSess, "org-1"), true);
+
+    assert.equal(sessionCanManageMembers(devSess, "org-1"), false);
+    assert.equal(sessionCanManageKeys(devSess, "org-1"), false);
+
+    assert.equal(sessionCanManageMembers(viewerSess, "org-1"), false);
+    assert.equal(sessionCanManageKeys(viewerSess, "org-1"), false);
+
+    const suspendedAdmin = sessionWithRole("admin", "SUSPENDED");
+    assert.equal(sessionCanManageMembers(suspendedAdmin, "org-1"), false);
+    assert.equal(sessionCanManageKeys(suspendedAdmin, "org-1"), false);
+
+    assert.equal(sessionCanManageMembers(adminSess, "other-org"), false);
+    assert.equal(sessionCanManageKeys(adminSess, "other-org"), false);
+  });
+});
+
+describe("payload:read permission gating (Blueprint §24.2)", () => {
+  test("viewer strictly lacks payload:read, others have it", () => {
+    assert.equal(PAYLOAD_READ_CAPABILITY, "payload:read");
+    assert.equal(roleCanReadPayload("viewer"), false);
+    assert.equal(roleCanReadPayload("Viewer"), false);
+    assert.equal(roleCanReadPayload("developer"), true);
+    assert.equal(roleCanReadPayload("operator"), true);
+    assert.equal(roleCanReadPayload("admin"), true);
+    assert.equal(roleCanReadPayload("owner"), true);
+  });
+
+  test("sessionCanReadPayload correctly gates viewer vs active members", () => {
+    assert.equal(
+      sessionCanReadPayload(sessionWithRole("viewer"), "org-1"),
+      false,
+    );
+    assert.equal(
+      sessionCanReadPayload(sessionWithRole("developer"), "org-1"),
+      true,
+    );
+    assert.equal(
+      sessionCanReadPayload(sessionWithRole("operator"), "org-1"),
+      true,
+    );
+    assert.equal(
+      sessionCanReadPayload(sessionWithRole("admin"), "org-1"),
+      true,
+    );
+    assert.equal(
+      sessionCanReadPayload(sessionWithRole("owner"), "org-1"),
+      true,
+    );
+
+    assert.equal(
+      sessionCanReadPayload(sessionWithRole("developer", "SUSPENDED"), "org-1"),
+      false,
+    );
+    assert.equal(
+      sessionCanReadPayload(sessionWithRole("developer"), "wrong-org"),
+      false,
+    );
+    assert.equal(sessionCanReadPayload(null, "org-1"), false);
   });
 });

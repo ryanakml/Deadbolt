@@ -256,7 +256,26 @@ func (h *HTTPHandler) Redeliver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newDelivery, err := h.service.Redeliver(r.Context(), caller.OrganizationID, deliveryID, auditFromCaller(caller, r))
+	var req struct {
+		EndpointID *string `json:"endpointId,omitempty"`
+	}
+	if r.Body != nil && r.ContentLength > 0 {
+		_ = json.NewDecoder(r.Body).Decode(&req)
+	}
+
+	if req.EndpointID != nil && *req.EndpointID != "" && caller.Type == tenant.IdentityTypeMachine && caller.EnvironmentID != "" {
+		ep, err := h.service.GetEndpoint(r.Context(), caller.OrganizationID, *req.EndpointID)
+		if err != nil {
+			writeServiceErr(w, r, err)
+			return
+		}
+		if ep.EnvironmentID != caller.EnvironmentID {
+			errJSON(w, r, http.StatusForbidden, "ENVIRONMENT_MISMATCH", "Destination endpoint belongs to a different environment")
+			return
+		}
+	}
+
+	newDelivery, err := h.service.Redeliver(r.Context(), caller.OrganizationID, deliveryID, req.EndpointID, auditFromCaller(caller, r))
 	if err != nil {
 		writeServiceErr(w, r, err)
 		return
@@ -379,6 +398,8 @@ func writeServiceErr(w http.ResponseWriter, r *http.Request, err error) {
 		errJSON(w, r, http.StatusNotFound, "DELIVERY_NOT_FOUND", "Webhook delivery not found")
 	case errors.Is(err, ErrRevisionConflict):
 		errJSON(w, r, http.StatusConflict, "REVISION_CONFLICT", "Webhook endpoint changed since it was read; refresh before acting")
+	case errors.Is(err, ErrEndpointInactive):
+		errJSON(w, r, http.StatusConflict, "ENDPOINT_INACTIVE", "Cannot redeliver to inactive webhook endpoint")
 	case errors.Is(err, ErrSSRFBlocked):
 		errJSON(w, r, http.StatusUnprocessableEntity, "SSRF_DESTINATION_BLOCKED", err.Error())
 	case errors.Is(err, ErrInvalidURL):

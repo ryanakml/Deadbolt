@@ -22,4 +22,13 @@ export declare const WEBHOOKS_WRITE_CAPABILITY = "webhooks:write";
 export declare function roleCanManageWebhooks(role: string | null | undefined): boolean;
 export declare function sessionCanManageWebhooks(session: AuthSession | null | undefined, orgId: string | null | undefined): boolean;
 export declare function visibleRerunControl(status: RunStatus, canControl: boolean): boolean;
+export declare const ADMIN_MEMBER_CAPABILITY = "admin:member";
+export declare function roleCanManageMembers(role: string | null | undefined): boolean;
+export declare function sessionCanManageMembers(session: AuthSession | null | undefined, orgId: string | null | undefined): boolean;
+export declare const ADMIN_KEY_CAPABILITY = "admin:key";
+export declare function roleCanManageKeys(role: string | null | undefined): boolean;
+export declare function sessionCanManageKeys(session: AuthSession | null | undefined, orgId: string | null | undefined): boolean;
+export declare const PAYLOAD_READ_CAPABILITY = "payload:read";
+export declare function roleCanReadPayload(role: string | null | undefined): boolean;
+export declare function sessionCanReadPayload(session: AuthSession | null | undefined, orgId: string | null | undefined): boolean;
 //# sourceMappingURL=permissions.d.ts.map

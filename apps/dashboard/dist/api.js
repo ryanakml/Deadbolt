@@ -640,20 +640,171 @@ export class DashboardApiClient {
         const body = (await res.json());
         return { items: body.items ?? [], nextCursor: body.nextCursor ?? null };
     }
-    // redeliverWebhook re-enqueues a webhook delivery.
-    async redeliverWebhook(deliveryId) {
+    // redeliverWebhook re-enqueues a webhook delivery, optionally to an explicit new destination endpoint.
+    async redeliverWebhook(deliveryId, newEndpointId) {
+        const body = {};
+        if (newEndpointId) {
+            body.endpointId = newEndpointId;
+        }
         const res = await apiFetch(`${this.baseUrl}/v1/webhook-deliveries/${encodeURIComponent(deliveryId)}/redeliver`, {
             method: "POST",
             headers: {
                 "Content-Type": "application/json",
                 "X-CSRF-Token": readCsrfToken(),
             },
-            body: JSON.stringify({}),
+            body: JSON.stringify(body),
         });
         if (!res.ok) {
-            throw new Error(`Failed to redeliver webhook (HTTP ${res.status}): ${res.statusText}`);
+            const errMsg = await extractErrorMessage(res, "Failed to redeliver webhook");
+            throw new Error(errMsg);
         }
         return res.json();
     }
+    // listMembers lists all members of an organization.
+    async listMembers(orgId) {
+        const res = await apiFetch(`${this.baseUrl}/v1/organizations/${encodeURIComponent(orgId)}/members`);
+        if (!res.ok) {
+            const errMsg = await extractErrorMessage(res, "Failed to list members");
+            throw new Error(errMsg);
+        }
+        const body = (await res.json());
+        return body.members ?? [];
+    }
+    // addMember adds a new member to an organization.
+    async addMember(orgId, userId, role, idempotencyKey) {
+        const res = await apiFetch(`${this.baseUrl}/v1/organizations/${encodeURIComponent(orgId)}/members`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": readCsrfToken(),
+                "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+            },
+            body: JSON.stringify({ userId, role }),
+        });
+        if (!res.ok) {
+            const errMsg = await extractErrorMessage(res, "Failed to add member");
+            throw new Error(errMsg);
+        }
+        return res.json();
+    }
+    // updateMemberRole updates a member's role.
+    async updateMemberRole(orgId, userId, role, idempotencyKey) {
+        const res = await apiFetch(`${this.baseUrl}/v1/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`, {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": readCsrfToken(),
+                "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+            },
+            body: JSON.stringify({ role }),
+        });
+        if (!res.ok) {
+            const errMsg = await extractErrorMessage(res, "Failed to update member role");
+            throw new Error(errMsg);
+        }
+    }
+    // updateMemberStatus updates a member's status (ACTIVE / SUSPENDED).
+    async updateMemberStatus(orgId, userId, status, idempotencyKey) {
+        const res = await apiFetch(`${this.baseUrl}/v1/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}/status`, {
+            method: "PATCH",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": readCsrfToken(),
+                "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+            },
+            body: JSON.stringify({ status }),
+        });
+        if (!res.ok) {
+            const errMsg = await extractErrorMessage(res, "Failed to update member status");
+            throw new Error(errMsg);
+        }
+    }
+    // removeMember removes a member from an organization.
+    async removeMember(orgId, userId, idempotencyKey) {
+        const res = await apiFetch(`${this.baseUrl}/v1/organizations/${encodeURIComponent(orgId)}/members/${encodeURIComponent(userId)}`, {
+            method: "DELETE",
+            headers: {
+                "X-CSRF-Token": readCsrfToken(),
+                "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+            },
+        });
+        if (!res.ok) {
+            const errMsg = await extractErrorMessage(res, "Failed to remove member");
+            throw new Error(errMsg);
+        }
+    }
+    // listApiKeys lists all API keys for an environment.
+    async listApiKeys(envId) {
+        const res = await apiFetch(`${this.baseUrl}/v1/environments/${encodeURIComponent(envId)}/api-keys`);
+        if (!res.ok) {
+            const errMsg = await extractErrorMessage(res, "Failed to list API keys");
+            throw new Error(errMsg);
+        }
+        const body = (await res.json());
+        return body.api_keys ?? [];
+    }
+    // createApiKey creates a new machine API key for an environment.
+    async createApiKey(envId, capabilities, expiryDays = 90, idempotencyKey) {
+        const res = await apiFetch(`${this.baseUrl}/v1/environments/${encodeURIComponent(envId)}/api-keys`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": readCsrfToken(),
+                "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+            },
+            body: JSON.stringify({ capabilities, expiry_days: expiryDays }),
+        });
+        if (!res.ok) {
+            const errMsg = await extractErrorMessage(res, "Failed to create API key");
+            throw new Error(errMsg);
+        }
+        return res.json();
+    }
+    // rotateApiKey rotates an existing API key, revoking the old one and returning a new plaintext secret.
+    async rotateApiKey(keyId, expiryDays = 90, idempotencyKey) {
+        const res = await apiFetch(`${this.baseUrl}/v1/api-keys/${encodeURIComponent(keyId)}/rotate`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "X-CSRF-Token": readCsrfToken(),
+                "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+            },
+            body: JSON.stringify({ expiry_days: expiryDays }),
+        });
+        if (!res.ok) {
+            const errMsg = await extractErrorMessage(res, "Failed to rotate API key");
+            throw new Error(errMsg);
+        }
+        return res.json();
+    }
+    // revokeApiKey revokes an existing API key immediately.
+    async revokeApiKey(keyId, idempotencyKey) {
+        const res = await apiFetch(`${this.baseUrl}/v1/api-keys/${encodeURIComponent(keyId)}`, {
+            method: "DELETE",
+            headers: {
+                "X-CSRF-Token": readCsrfToken(),
+                "Idempotency-Key": idempotencyKey ?? newIdempotencyKey(),
+            },
+        });
+        if (!res.ok) {
+            const errMsg = await extractErrorMessage(res, "Failed to revoke API key");
+            throw new Error(errMsg);
+        }
+    }
+}
+async function extractErrorMessage(res, defaultPrefix) {
+    try {
+        const data = (await res.json());
+        if (data && typeof data.message === "string" && data.message.length > 0) {
+            return data.message;
+        }
+        if (data && typeof data.code === "string" && data.code.length > 0) {
+            return data.code;
+        }
+    }
+    catch {
+        // fallback
+    }
+    return `${defaultPrefix} (HTTP ${res.status}): ${res.statusText}`;
 }
 //# sourceMappingURL=api.js.map
