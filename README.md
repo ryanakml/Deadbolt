@@ -2,7 +2,7 @@
   <img src="assets/readme/mark.svg" width="80" height="80" alt="Deadbolt logo" />
 </p>
 
-<h1 align="center">tf-low</h1>
+<h1 align="center">Deadbolt</h1>
 
 <p align="center">
   <strong>Durable workflows. Observable recovery.</strong><br />
@@ -11,7 +11,7 @@
 
 <p align="center">
   <a href="docs/blueprint.md"><img src="https://img.shields.io/badge/Blueprint-v1.0-fa9c54?style=flat-square&amp;labelColor=171c24" alt="Product and engineering blueprint v1.0" /></a>
-  <img src="https://img.shields.io/badge/Stage-Pre--development-8b9bb0?style=flat-square&amp;labelColor=171c24" alt="Stage: pre-development" />
+  <img src="https://img.shields.io/badge/Stage-Late--stage-8b9bb0?style=flat-square&amp;labelColor=171c24" alt="Stage: late-stage implementation" />
   <img src="https://img.shields.io/badge/Compute-Self--hosted_workers-62d8b6?style=flat-square&amp;labelColor=171c24" alt="Architecture: self-hosted workers" />
 </p>
 
@@ -39,7 +39,7 @@
   <br /><sub>Run Inspector — interface concept illustrating the planned recovery experience, not a running application.</sub>
 </p>
 
-> **Repository status:** the M0 foundation acceptance gate is complete. The architecture, stack, interface concept, and SDK example below describe the intended product; there is no installable SDK, released CLI, or production service yet.
+> **Status:** Deadbolt is in its final release phase. The repository contains a Go control plane, self-hosted workers, a TypeScript SDK, CLI, and operator dashboard. [M4 acceptance](docs/reports/M4-acceptance.md) records approval and schedule recovery, and the M5 implementation includes [version compatibility and rollback](docs/compatibility-and-rollback-guide.md), signed webhooks, and workspace access controls. [M6 hardening and release acceptance](https://github.com/ryanakml/deadbolt/milestone/7) tracks the public release gate.
 
 ## The product
 
@@ -118,7 +118,7 @@ Durability is a precise contract, not a promise that every external API call suc
 
 ## Developer experience
 
-The intended workflow is local-first:
+The developer workflow is local-first:
 
 1. **Define** named TypeScript tasks and a declarative workflow.
 2. **Run locally** with the CLI and a Docker Compose development stack.
@@ -132,7 +132,7 @@ In this model, `runtime deploy` registers the manifest. It does not upload custo
 <details>
 <summary><strong>Preview the workflow definition</strong></summary>
 
-The following is the planned SDK contract, not an installable package or runnable quickstart. The named tasks must be defined in the same deployment bundle.
+This example shows how a workflow declares tasks and dependencies. The named tasks must be defined in the same deployment bundle. Use the [local CLI quickstart](docs/quickstart-cli-journey.md) to run the repository example.
 
 ```ts
 import { defineWorkflow, input, output } from "@runtime/sdk";
@@ -217,7 +217,7 @@ Testing, migrations, Docker, CI/CD, security, and observability grow with every 
 
 ## Start here
 
-This repository contains the blueprint, collaboration guide, M0 executable Go/TypeScript contracts, and the [M0 Foundation Acceptance Report](docs/reports/M0-foundation-acceptance.md). See the [clean-clone workspace setup](docs/workspace-setup.md) to build and validate the contracts, or run `./scripts/verify-clean-clone.sh` to execute the fail-closed local verification suite. It installs locked Node dependencies and pinned local tools; Go, Docker Compose, and curl must already be available. To explore the design:
+Follow the [local CLI quickstart](docs/quickstart-cli-journey.md) to build the CLI and SDK from source and run the example workflow. To check the workspace, use the [clean-clone setup](docs/workspace-setup.md) or run the verification suite below. It uses Go, Docker Compose, and curl and installs locked Node dependencies and pinned local tools.
 
 ```bash
 git clone https://github.com/Ryanakml/Deadbolt.git
@@ -225,9 +225,9 @@ cd Deadbolt
 ./scripts/verify-clean-clone.sh
 ```
 
-Read the [Product & Engineering Blueprint](docs/blueprint.md) for the full design: execution semantics, data model, failure recovery, security, operations, and milestone gates. The blueprint uses **Runtime Cloud** as its original working name; **Deadbolt** is the repository and product identity used here. The `runtime` CLI and `@runtime/sdk` names remain the planned interfaces defined by that blueprint.
+Read the [Product & Engineering Blueprint](docs/blueprint.md) for the full design: execution semantics, data model, failure recovery, security, operations, and milestone gates. The blueprint uses **Runtime Cloud** as its original working name; **Deadbolt** is the repository and product identity used here. The source tree contains the `runtime` CLI and `@runtime/sdk`.
 
-A runnable installation guide will be added alongside the actual CLI, SDK, and development stack. The dependency-ordered execution plan is tracked in [GitHub milestones](https://github.com/Ryanakml/Deadbolt/milestones) and [issues](https://github.com/Ryanakml/Deadbolt/issues). Read the [Developer Guide](docs/developer-guide.md) for the two-person execution plan, parallel-work boundaries, review workflow, and acceptance rules.
+Release work and acceptance gates are tracked in [GitHub milestones](https://github.com/Ryanakml/Deadbolt/milestones) and [issues](https://github.com/Ryanakml/Deadbolt/issues). Read the [Developer Guide](docs/developer-guide.md) for the two-person execution plan, parallel-work boundaries, review workflow, and acceptance rules.
 
 ## Contributing & questions
 
